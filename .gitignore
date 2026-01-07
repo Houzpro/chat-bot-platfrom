@@ -1,0 +1,39 @@
+*.gguf
+*.bin
+*.ckpt
+*.pt
+*.h5
+*.pkl
+*.npz
+*.tar.gz
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+*.bz2
+*.xz
+*.log
+*.tmp
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite3
+*.swp
+*.swo
+*.bak
+# Исключить модели и большие папки
+services/python-ai/models/
+services/python-ai/app/models/
+services/python-ai/app/__pycache__/
+services/python-ai/app/api/__pycache__/
+services/python-ai/app/config/__pycache__/
+services/python-ai/app/services/__pycache__/
+frontend/node_modules/
+frontend/dist/
+# huggingface cache
+~/.cache/
+# blobs и snapshots huggingface
+services/python-ai/models/*/blobs/
+services/python-ai/models/*/snapshots/

@@ -1,0 +1,210 @@
+services:
+  # ============================================================================
+  # VECTOR DATABASE
+  # ============================================================================
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: chatbot-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT_REST}:6333"   # REST API
+      - "${QDRANT_PORT_GRPC}:6334"   # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: chatbot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chatbot
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: chatbot_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/backend/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # MICROSERVICES
+  # ============================================================================
+
+  ai-service:
+    build:
+      context: ./services/python-ai
+      dockerfile: Dockerfile
+    container_name: chatbot-ai-service
+    restart: unless-stopped
+    environment:
+      # AI Model Configuration
+      GGUF_MODEL_PATH: ${GGUF_MODEL_PATH}
+      N_THREADS: ${N_THREADS}
+      N_CTX: ${N_CTX}
+      
+      # Generation Parameters
+      GEN_MAX_NEW_TOKENS: ${GEN_MAX_NEW_TOKENS}
+      GEN_TEMPERATURE: ${GEN_TEMPERATURE}
+      GEN_TOP_P: ${GEN_TOP_P}
+      GEN_TOP_K: ${GEN_TOP_K}
+      GEN_DO_SAMPLE: ${GEN_DO_SAMPLE}
+      GEN_SYSTEM_BASE_PROMPT: ${GEN_SYSTEM_BASE_PROMPT}
+      GEN_USER_PROMPT: ${GEN_USER_PROMPT}
+      
+      # Embeddings Configuration
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
+      EMBEDDING_CACHE_FOLDER: /app/models/embedding
+      
+      # Hybrid Search Configuration
+      USE_HYBRID_SEARCH: ${USE_HYBRID_SEARCH}
+      BM25_WEIGHT: ${BM25_WEIGHT}
+      VECTOR_WEIGHT: ${VECTOR_WEIGHT}
+    ports:
+      - "${AI_SERVICE_PORT}:8000"
+    volumes:
+      - ./services/python-ai/models:/app/models
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  document-parser:
+    build:
+      context: ./services/document-parser-service
+      dockerfile: Dockerfile
+    container_name: chatbot-document-parser
+    restart: unless-stopped
+    environment:
+      PORT: ${DOCUMENT_PARSER_PORT}
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE}
+      BODY_LIMIT: ${BODY_LIMIT}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
+      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS}
+      CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS}
+      LOG_LEVEL: ${LOG_LEVEL}
+    ports:
+      - "${DOCUMENT_PARSER_PORT}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  vector-db:
+    build:
+      context: ./services/vector-db-service
+      dockerfile: Dockerfile
+    container_name: chatbot-vector-db
+    restart: unless-stopped
+    environment:
+      PORT: ${VECTOR_DB_PORT}
+      QDRANT_HOST: ${QDRANT_HOST}
+      QDRANT_PORT: ${QDRANT_PORT_GRPC}
+      QDRANT_COLLECTION_SIZE: ${QDRANT_COLLECTION_SIZE}
+      RAG_SCORE_THRESHOLD: ${RAG_SCORE_THRESHOLD}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
+      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS}
+      CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS}
+      LOG_LEVEL: ${LOG_LEVEL}
+    ports:
+      - "${VECTOR_DB_PORT}:8082"
+    depends_on:
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8082/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build:
+      context: ./services/backend
+      dockerfile: Dockerfile
+    container_name: chatbot-backend
+    restart: unless-stopped
+    environment:
+      # Server Configuration
+      PORT: ${BACKEND_PORT}
+      
+      # Database Configuration
+      DATABASE_URL: postgresql://chatbot:chatbot_password@postgres:5432/chatbot?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      
+      # Microservices URLs
+      DOC_PARSER_URL: ${DOC_PARSER_URL}
+      VECTOR_URL: ${VECTOR_URL}
+      AI_URL: ${AI_URL}
+      
+      # RAG Configuration
+      CHUNK_SIZE: ${CHUNK_SIZE}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP}
+      RAG_MAX_DOC_CHARS: ${RAG_MAX_DOC_CHARS}
+      RAG_MAX_RESULTS: ${RAG_MAX_RESULTS}
+      RAG_SCORE_THRESHOLD: ${RAG_SCORE_THRESHOLD}
+      
+      # Generation Defaults
+      GEN_MAX_NEW_TOKENS: ${GEN_MAX_NEW_TOKENS}
+      GEN_TEMPERATURE: ${GEN_TEMPERATURE}
+      GEN_TOP_P: ${GEN_TOP_P}
+      GEN_TOP_K: ${GEN_TOP_K}
+      GEN_DO_SAMPLE: ${GEN_DO_SAMPLE}
+      GEN_SYSTEM_BASE_PROMPT: ${GEN_SYSTEM_BASE_PROMPT}
+      GEN_USER_PROMPT: ${GEN_USER_PROMPT}
+      
+      # HTTP Client Settings
+      HTTP_TIMEOUT_SEC: ${HTTP_TIMEOUT_SEC}
+      
+      # CORS Settings
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
+      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS}
+      CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL}
+    ports:
+      - "${BACKEND_PORT}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      document-parser:
+        condition: service_started
+      vector-db:
+        condition: service_started
+      ai-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chatbot-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT}:80"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  qdrant_storage:

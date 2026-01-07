@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.log
+*.swp
+*.swo
+
+# Не тянем локальные модели и веса в образ
+models/
+
+# Виртуальные окружения
+.venv/
+venv/
+ENV/
+
+# Git и прочее
+.git/
+.gitignore
+.cache/
+
+# Static files (not needed in production)
+app/static/

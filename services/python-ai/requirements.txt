@@ -1,0 +1,23 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+
+# Для эмбеддингов (RAG)
+sentence-transformers
+torch  # требуется для sentence-transformers
+
+# GGUF модели для быстрой CPU генерации
+llama-cpp-python
+
+# BM25 для keyword search (гибридный поиск)
+rank-bm25
+nltk
+
+# Дополнительные утилиты
+python-multipart  # для загрузки файлов в /ask эндпоинты
+
+# Langchain и зависимости
+langchain
+langchain-community
+langchain-core

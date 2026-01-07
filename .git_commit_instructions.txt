@@ -1,0 +1,5 @@
+1. Все тяжелые файлы теперь игнорируются через .gitignore.
+2. Следующие команды выполнят коммит и подготовят проект к пушу:
+   git add .
+   git commit -m "Add .gitignore to exclude large files"
+   git push -u origin main
