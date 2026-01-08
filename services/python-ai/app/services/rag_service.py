@@ -12,16 +12,6 @@ import nltk
 from app.config.settings import settings
 
 
-# Скачать необходимые данные для NLTK
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    try:
-        nltk.download('punkt', quiet=True)
-    except Exception:
-        pass
-
-
 def clean_pdf_artifacts(text: str) -> str:
     """
     Удалить артефакты и мусор из распарсенного PDF

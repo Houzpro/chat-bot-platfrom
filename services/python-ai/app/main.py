@@ -15,8 +15,6 @@ print(f"🔧 Используется GGUF модель: {settings.gguf_model_pa
 from app.api import routes
 routes.model_service = model_service
 
-from app.api.routes import router
-from app.api.semantic_chunking import router as semantic_chunking_router
 
 
 @asynccontextmanager
@@ -42,5 +40,5 @@ app = FastAPI(
 )
 
 # Подключаем роутеры
-app.include_router(router)
-app.include_router(semantic_chunking_router)
+app.include_router(routes.router)
+
