@@ -1,253 +1,133 @@
-# 🤖 RAG Chat Platform
+RAG Chat Platform — обзор и инструкции
 
-**Микросервисная платформа для интеллектуального чата с документами на базе RAG (Retrieval-Augmented Generation)**
+Репозиторий содержит микросервисную платформу для Retrieval-Augmented Generation (RAG): парсинг документов, индексация в векторную БД, вычисление эмбеддингов и генерация ответов через локальную LLM-службу.
 
-[![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen)]()
-[![Docker](https://img.shields.io/badge/docker-ready-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
+Ниже — актуальное описание структуры, конфигурации и команд для развёртывания и разработки.
 
----
+## Содержание
 
-## ⚡ Quick Start
+- Обзор сервисов
+- Быстрый запуск (Docker Compose)
+- Локальная разработка
+- Важные файлы и конфигурация
+- Порты и эндпоинты
+- Проверка работоспособности
+
+## Обзор сервисов
+
+- Frontend: React + Vite (папка `frontend`) — статический UI.
+- Backend Gateway: Go + Fiber (папка `services/backend`) — API и RAG pipeline.
+- Document Parser: Go (папка `services/document-parser-service`) — извлечение текста.
+- Vector DB Service: Go (папка `services/vector-db-service`) — интеграция с Qdrant.
+- AI Service: Python + FastAPI (папка `services/python-ai`) — LLM inference и эмбеддинги.
+- Qdrant: векторная база данных (контейнер `qdrant`).
+- PostgreSQL: контейнер `postgres` для метаданных.
+
+## Быстрый запуск (Docker Compose)
+
+1. Отредактируйте файл `.env` в корне репозитория при необходимости.
+2. Запустите все сервисы:
 
 ```bash
-# Клонировать и запустить
-git clone <repo-url>
-cd chat-bot-platfrom
 docker-compose up -d --build
-
-# Открыть в браузере
-open http://localhost:3000
 ```
 
-Через 30-60 секунд все сервисы будут готовы!
+Доступ по умолчанию:
 
----
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8080
+- AI Service: http://localhost:8000
+- Document Parser: http://localhost:8081
+- Vector DB Service: http://localhost:8082
+- Qdrant UI: http://localhost:6333/dashboard
 
-## 🎯 Возможности
+Если порты конфликтуют, измените `.env` и `docker-compose.yml`.
 
-- ✅ **Загрузка документов** - PDF, DOCX, TXT, CSV, JSON, HTML, MD
-- ✅ **Векторный поиск** - Семантический поиск через Qdrant
-- ✅ **RAG генерация** - Ответы на основе контекста документов
-- ✅ **Streaming** - Потоковая генерация в реальном времени
-- ✅ **Настраиваемая модель** - Полный контроль параметров через UI
-- ✅ **CPU-оптимизация** - Работает на CPU с GGUF моделями
+## Локальная разработка и тестирование
 
----
-
-## 🏗️ Архитектура
-
-```
-Frontend (React) :3000
-       ↓
-Backend Gateway (Go) :8080
-       ↓
-  ┌────┴────┬──────────┐
-  ↓         ↓          ↓
-Document  Vector   AI Service
-Parser    DB Svc   (Python)
-:8081     :8082      :8000
-          ↓
-       Qdrant
-    :6333/:6334
-```
-
-**Микросервисы:**
-- **Frontend** - React 18 + Vite
-- **Backend Gateway** - Go + Fiber (оркестрация)
-- **Document Parser** - Go (парсинг файлов)
-- **Vector DB Service** - Go + Qdrant gRPC
-- **AI Service** - Python + FastAPI + llama-cpp
-- **Qdrant** - Vector Database
-
----
-
-## 📚 Документация
-
-- **[PLATFORM_GUIDE.md](PLATFORM_GUIDE.md)** - 📖 Полное руководство по платформе
-- **[CONFIGURATION.md](CONFIGURATION.md)** - ⚙️ Конфигурация и переменные окружения
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - 🚀 Развертывание и управление
-
----
-
-## 🚀 Использование
-
-### 1. Загрузка документа
-
-Откройте http://localhost:3000 и загрузите файл через drag & drop.
-
-### 2. Задайте вопрос
-
-Напишите вопрос в чате - система найдет релевантные части документа и сгенерирует ответ.
-
-### 3. Настройте параметры (опционально)
-
-Нажмите ⚙️ для настройки:
-- Temperature (0-2)
-- Top P (0-1)
-- Top K (1-100)
-- Max Tokens (32-2048)
-- System Prompt
-
----
-
-## 🛠️ Технологический стек
-
-| Компонент | Технология |
-|-----------|------------|
-| Frontend | React 18, Vite |
-| Backend | Go 1.23, Fiber |
-| AI Service | Python 3.10, FastAPI |
-| LLM | Qwen3-4B (GGUF) |
-| Vector DB | Qdrant |
-| Embeddings | sentence-transformers |
-
----
-
-## 📊 Основные параметры
+Примеры ручного запуска сервисов (альтернатива Docker):
 
 ```bash
-# Модель
-GGUF_MODEL_PATH=./models/qwen3-4b-q4_k_m.gguf
-N_THREADS=6
-N_CTX=8192
-
-# Генерация (можно менять через UI)
-GEN_MAX_NEW_TOKENS=512
-GEN_TEMPERATURE=0.75
-GEN_TOP_P=0.92
-GEN_TOP_K=40
-
-# RAG
-RAG_TOP_K=3
-CHUNK_SIZE=2500
-```
-
-Все параметры настраиваются в файле `.env`.
-
----
-
-## 🧪 Тестирование
-
-```bash
-# Интеграционные тесты
-./test-integration.sh
-
-# Тест параметров модели
-./test-model-params.sh
-```
-
----
-
-## 📦 API Examples
-
-### Загрузка документа
-
-```bash
-curl -X POST http://localhost:8080/api/v1/documents/upload \
-  -F "file=@document.pdf" \
-  -F "client_id=user123"
-```
-
-### RAG чат
-
-```bash
-curl -X POST http://localhost:8080/api/v1/chat/rag \
-  -H "Content-Type: application/json" \
-  -d '{
-    "client_id": "user123",
-    "query": "что такое JSON",
-    "limit": 3
-  }'
-```
-
-Подробнее в [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md#api-documentation)
-
----
-
-## 🔧 Разработка
-
-### Локальный запуск
-
-```bash
-# 1. Запустить Qdrant
+# Запуск Qdrant (локально)
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
-# 2. Запустить микросервисы
-cd services/document-parser-service && go run main.go &
-cd services/vector-db-service && go run main.go &
-cd services/python-ai && ./start.sh &
-cd services/backend && go run main.go &
+# Backend
+cd services/backend
+export $(cat ../../.env | xargs)  # при необходимости
+go run main.go
 
-# 3. Запустить frontend
-cd frontend && npm run dev
+# Document parser
+cd ../document-parser-service
+go run main.go
+
+# Vector DB service
+cd ../vector-db-service
+go run main.go
+
+# AI service
+cd ../python-ai
+./start.sh
+
+# Frontend (dev)
+cd ../../frontend
+npm install
+npm run dev
 ```
 
-### Структура проекта
+## Важные файлы и конфигурация
 
-```
-chat-bot-platfrom/
-├── .env                      # Единая конфигурация
-├── docker-compose.yml        # Docker оркестрация
-├── PLATFORM_GUIDE.md         # Полное руководство
-├── frontend/                 # React UI
-├── services/
-│   ├── backend/             # Go API Gateway
-│   ├── document-parser-service/  # Go парсер
-│   ├── vector-db-service/   # Go Qdrant клиент
-│   └── python-ai/           # Python LLM сервис
-└── test-*.sh                # Интеграционные тесты
-```
+- `.env` — единый конфиг для всех сервисов.
+- `docker-compose.yml` — описывает контейнеры и зависимости.
+- `services/python-ai/models/` — место для GGUF моделей и кешей эмбеддингов (файлы больших размеров исключены из git).
+- `services/backend/database/schema.sql` — SQL-схема для инициализации PostgreSQL.
 
----
+## Основные порты (по умолчанию)
 
-## 🐛 Troubleshooting
+- Frontend: `3000`
+- Backend: `8080`
+- AI Service: `8000`
+- Document Parser: `8081`
+- Vector DB Service: `8082`
+- Qdrant REST: `6333`, gRPC: `6334`
+- Postgres: `5432`
 
-### Контейнеры не запускаются
+## Проверка работоспособности
+
+Примеры запросов для проверки:
 
 ```bash
-docker-compose logs -f
-docker-compose ps
-```
-
-### Модель не загружается
-
-```bash
-docker logs chatbot-ai-service
-ls -lh services/python-ai/models/*.gguf
-```
-
-### Backend ошибки
-
-```bash
+# Health check backend
 curl http://localhost:8080/health
-docker-compose ps
+
+# Health check AI service
+curl http://localhost:8000/health
+
+# Отправка файла на парсер (через backend)
+curl -X POST http://localhost:8080/api/v1/documents/upload \
+  -F "file=@document.pdf" \
+  -F "client_id=test"
+
+# Пример RAG-запроса (через backend)
+curl -X POST http://localhost:8080/api/v1/chat/rag \
+  -H "Content-Type: application/json" \
+  -d '{"bot_id":"<bot_id>","query":"Что такое машинное обучение?"}'
 ```
 
-Подробнее в [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md#troubleshooting)
+## Заметки по разработке
+
+- Большие файлы моделей (`*.gguf`) и бинарные веса исключены из репозитория — используйте LFS или внешнее хранение.
+- Параметры генерации модели задаются переменными окружения (`GEN_*`), см. `CONFIGURATION.md`.
+- Backend содержит реализацию аутентификации JWT, управление ботами и endpoints для загрузки документов.
+
+## Документация проекта
+
+- [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md)
+- [CONFIGURATION.md](CONFIGURATION.md)
+- [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ---
 
-## 📋 Управление
-
-```bash
-# Просмотр логов
-docker-compose logs -f [service]
-
-# Перезапуск
-docker-compose restart [service]
-
-# Пересборка
-docker-compose up -d --build [service]
-
-# Остановка
-docker-compose down
-```
-
----
-
-## 🎓 Как это работает
-
+Если нужно, могу добавить пример `.env.local`, скрипты для проверки статуса контейнеров или краткий раздел с часто встречающимися ошибками и логами.
 ### RAG Pipeline
 
 1. **Индексация документа:**
