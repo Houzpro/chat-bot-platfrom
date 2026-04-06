@@ -1,0 +1,20 @@
+# GPU override — use with: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Requires NVIDIA GPU drivers and nvidia-container-toolkit
+services:
+  llama-cpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    command: >
+      --model /models/${GGUF_MODEL_FILE:-qwen3-4b-q4_k_m.gguf}
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size ${N_CTX:-32768}
+      --threads ${N_THREADS:-6}
+      --n-gpu-layers -1
+      --parallel ${LLAMA_PARALLEL:-2}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

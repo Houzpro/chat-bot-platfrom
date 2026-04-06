@@ -3,7 +3,7 @@ import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import './App.css'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 function App() {
   const [token, setToken] = useState(null)

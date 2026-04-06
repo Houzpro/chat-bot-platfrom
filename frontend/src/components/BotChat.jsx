@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { ArrowLeft, Upload, MessageSquare, Send } from 'lucide-react'
 import './BotChat.css'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 function BotChat({ bot, token, onBack }) {
   const [messages, setMessages] = useState([])
@@ -61,7 +61,7 @@ function BotChat({ bot, token, onBack }) {
         },
         body: JSON.stringify({
           message: inputMessage,
-          limit: 3,
+          limit: 60,
           temperature: bot.temperature,
           top_p: bot.top_p,
           top_k: bot.top_k,

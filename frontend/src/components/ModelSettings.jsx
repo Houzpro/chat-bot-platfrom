@@ -9,32 +9,15 @@ function ModelSettings({ settings, onChange, onClose }) {
 
   const resetDefaults = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/v1/config/defaults')
+      const response = await fetch('/api/v1/config/defaults')
       if (response.ok) {
         const defaults = await response.json()
         onChange(defaults)
       } else {
-        // Fallback to hardcoded defaults if API fails
-        onChange({
-          temperature: 0.75,
-          top_p: 0.92,
-          top_k: 40,
-          max_new_tokens: 512,
-          do_sample: true,
-          user_prompt: 'You are a highly knowledgeable and precise assistant. Provide comprehensive, detailed, and well-structured answers based on the given context. Include all relevant information and explain concepts thoroughly.'
-        })
+        console.error('Failed to load defaults: HTTP', response.status)
       }
     } catch (error) {
       console.error('Failed to load defaults:', error)
-      // Fallback
-      onChange({
-        temperature: 0.75,
-        top_p: 0.92,
-        top_k: 40,
-        max_new_tokens: 512,
-        do_sample: true,
-        user_prompt: 'You are a highly knowledgeable and precise assistant. Provide comprehensive, detailed, and well-structured answers based on the given context. Include all relevant information and explain concepts thoroughly.'
-      })
     }
   }
 

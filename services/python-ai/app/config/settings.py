@@ -10,10 +10,11 @@ import sys
 class Settings(BaseSettings):
     """Настройки приложения"""
     
-    # GGUF модель (CPU оптимизированная)
+    # llama.cpp server URL (модель хостится в отдельном контейнере)
+    llama_server_url: str = os.getenv("LLAMA_SERVER_URL", "http://llama-cpp:8080")
+
+    # GGUF модель (информационные поля для health endpoint)
     gguf_model_path: str | None = os.getenv("GGUF_MODEL_PATH")
-    n_ctx: int = int(os.getenv("N_CTX", "0"))
-    n_threads: int = int(os.getenv("N_THREADS", "0"))
 
     # Настройки генерации ответов
     generation_max_new_tokens: int = int(os.getenv("GEN_MAX_NEW_TOKENS", "0"))
@@ -26,10 +27,10 @@ class Settings(BaseSettings):
     generation_system_base_prompt: str = os.getenv("GEN_SYSTEM_BASE_PROMPT", "")
     generation_user_prompt: str = os.getenv("GEN_USER_PROMPT", "")
     generation_stop_sequences: list[str] = [
-        "<|im_end|>",
-        "<|endoftext|>",
-        "\n\nUser:",
-        "\n\nHuman:"
+        s.strip() for s in os.getenv(
+            "GEN_STOP_SEQUENCES",
+            "<|im_end|>,<|endoftext|>"
+        ).split(",") if s.strip()
     ]
     
     # Embeddings для RAG
@@ -49,6 +50,10 @@ class Settings(BaseSettings):
     
     # Contextual Compression (DEPRECATED - используем полный контекст)
     use_contextual_compression: bool = os.getenv("USE_CONTEXTUAL_COMPRESSION", "false").lower() in {"true", "1", "yes", "on"}
+
+    # Relevance thresholds
+    relevance_escalation_threshold: float = float(os.getenv("RELEVANCE_ESCALATION_THRESHOLD", "2.0"))
+    embedding_similarity_autopass: float = float(os.getenv("EMBEDDING_SIMILARITY_AUTOPASS", "0.65"))
     
     class Config:
         env_file = ".env"
@@ -56,13 +61,9 @@ class Settings(BaseSettings):
     def validate_settings(self):
         """Валидация конфигурации при старте"""
         errors = []
-        
-        if not self.gguf_model_path:
-            errors.append("GGUF_MODEL_PATH is required")
-        if self.n_ctx <= 0:
-            errors.append("N_CTX must be positive")
-        if self.n_threads <= 0:
-            errors.append("N_THREADS must be positive")
+
+        if not self.llama_server_url:
+            errors.append("LLAMA_SERVER_URL is required")
         if self.generation_max_new_tokens <= 0:
             errors.append("GEN_MAX_NEW_TOKENS must be positive")
         if self.generation_temperature < 0:
@@ -75,9 +76,9 @@ class Settings(BaseSettings):
             errors.append("EMBEDDING_MODEL_NAME is required")
         if not self.embedding_cache_folder:
             errors.append("EMBEDDING_CACHE_FOLDER is required")
-        
+
         if errors:
-            print("❌ Configuration validation failed:", file=sys.stderr)
+            print("Configuration validation failed:", file=sys.stderr)
             for error in errors:
                 print(f"  - {error}", file=sys.stderr)
             sys.exit(1)

@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { ArrowLeft, Save, Upload, X, FileText } from 'lucide-react'
 import './BotForm.css'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 // Ensure we never send invalid numeric values that would break backend JSON parsing
 const sanitizeBotPayload = (data) => {
@@ -35,14 +35,36 @@ function BotForm({ token, bot, onSave, onCancel }) {
   const [formData, setFormData] = useState({
     name: bot?.name || '',
     description: bot?.description || '',
-    temperature: bot?.temperature || 0.75,
-    top_p: bot?.top_p || 0.92,
-    top_k: bot?.top_k || 40,
-    max_new_tokens: bot?.max_new_tokens || 512,
+    temperature: bot?.temperature ?? 0.7,
+    top_p: bot?.top_p ?? 0.9,
+    top_k: bot?.top_k ?? 40,
+    max_new_tokens: bot?.max_new_tokens ?? 512,
     do_sample: bot?.do_sample ?? true,
-    system_prompt: bot?.system_prompt || 'You are a helpful AI assistant.',
+    system_prompt: bot?.system_prompt || '',
     is_active: bot?.is_active ?? true
   })
+
+  // Load server defaults for new bots
+  useEffect(() => {
+    if (!bot) {
+      fetch(`${API_BASE}/config/defaults`)
+        .then(r => r.ok ? r.json() : null)
+        .then(defaults => {
+          if (defaults) {
+            setFormData(prev => ({
+              ...prev,
+              temperature: defaults.temperature ?? prev.temperature,
+              top_p: defaults.top_p ?? prev.top_p,
+              top_k: defaults.top_k ?? prev.top_k,
+              max_new_tokens: defaults.max_new_tokens ?? prev.max_new_tokens,
+              do_sample: defaults.do_sample ?? prev.do_sample,
+              system_prompt: prev.system_prompt || defaults.user_prompt || '',
+            }))
+          }
+        })
+        .catch(() => {})
+    }
+  }, [bot])
   const [files, setFiles] = useState([])
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -60,26 +82,10 @@ function BotForm({ token, bot, onSave, onCancel }) {
   const uploadDocuments = async (botId) => {
     if (files.length === 0) return true
 
-    const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
-    const allowedExtensions = ['.pdf', '.txt', '.docx', '.doc', '.csv', '.xlsx', '.json', '.md', '.html']
-
     setUploadProgress('Uploading documents...')
-    
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
-      const fileNameLower = file.name.toLowerCase()
-
-      // Client-side validation mirrors backend limits for clearer errors
-      if (file.size > MAX_FILE_SIZE) {
-        setError(`File ${file.name} is too large (max 100MB)`) 
-        return false
-      }
-
-      const isAllowed = allowedExtensions.some(ext => fileNameLower.endsWith(ext))
-      if (!isAllowed) {
-        setError(`Unsupported file type for ${file.name}. Allowed: ${allowedExtensions.join(', ')}`)
-        return false
-      }
 
       setUploadProgress(`Uploading ${i + 1}/${files.length}: ${file.name}`)
       
@@ -333,7 +339,7 @@ function BotForm({ token, bot, onSave, onCancel }) {
               <label htmlFor="file-upload" className="upload-label">
                 <Upload size={32} />
                 <span>Click to upload or drag and drop</span>
-                <small>PDF, TXT, DOCX, CSV, XLSX, JSON, MD, HTML (max 100MB each)</small>
+                <small>PDF, TXT, DOCX, CSV, XLSX, JSON, MD, HTML</small>
               </label>
             </div>
 

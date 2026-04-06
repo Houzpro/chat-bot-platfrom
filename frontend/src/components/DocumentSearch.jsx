@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Search, Loader } from 'lucide-react'
 import './DocumentSearch.css'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 function DocumentSearch({ clientId }) {
   const [query, setQuery] = useState('')

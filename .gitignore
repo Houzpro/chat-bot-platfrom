@@ -23,9 +23,10 @@ __pycache__/
 *.swp
 *.swo
 *.bak
-# Исключить модели и большие папки
+# Исключить кеш моделей и большие папки
+models/*
+!models/.gitkeep
 services/python-ai/models/
-services/python-ai/app/models/
 services/python-ai/app/__pycache__/
 services/python-ai/app/api/__pycache__/
 services/python-ai/app/config/__pycache__/
@@ -37,3 +38,5 @@ frontend/dist/
 # blobs и snapshots huggingface
 services/python-ai/models/*/blobs/
 services/python-ai/models/*/snapshots/
+
+*claude

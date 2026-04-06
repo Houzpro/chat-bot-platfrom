@@ -5,19 +5,17 @@ pydantic-settings
 
 # Для эмбеддингов (RAG)
 sentence-transformers
-torch  # требуется для sentence-transformers
 
-# GGUF модели для быстрой CPU генерации
-llama-cpp-python
+# HTTP клиент для llama.cpp server API
+httpx
+
+# Чанкинг документов (RecursiveCharacterTextSplitter)
+langchain-text-splitters
 
 # BM25 для keyword search (гибридный поиск)
 rank-bm25
 nltk
 
 # Дополнительные утилиты
-python-multipart  # для загрузки файлов в /ask эндпоинты
-
-# Langchain и зависимости
-langchain
-langchain-community
-langchain-core
+python-multipart
+numpy

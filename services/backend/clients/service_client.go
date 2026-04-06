@@ -310,11 +310,12 @@ func (c *Client) StreamGeneration(aiURL string, req models.GenerateRequest) (*ht
 }
 
 // AdvancedSearch calls the AI service for advanced RAG search with reranking
-func (c *Client) AdvancedSearch(aiURL, botID, query string, vectorResults []map[string]any, topK int, maxContextChars int) (map[string]any, error) {
+func (c *Client) AdvancedSearch(aiURL, botID, query string, vectorResults []map[string]any, allDocuments []map[string]any, topK int, maxContextChars int) (map[string]any, error) {
 	reqBody, err := json.Marshal(map[string]any{
 		"bot_id":            botID,
 		"query":             query,
 		"vector_results":    vectorResults,
+		"all_documents":     allDocuments,
 		"top_k":             topK,
 		"max_context_chars": maxContextChars,
 	})
@@ -345,30 +346,3 @@ func (c *Client) AdvancedSearch(aiURL, botID, query string, vectorResults []map[
 	return result, nil
 }
 
-// BuildBM25Index calls the AI service to build BM25 index for a bot
-func (c *Client) BuildBM25Index(aiURL, botID string, documents []map[string]any) error {
-	reqBody, err := json.Marshal(map[string]any{
-		"bot_id":    botID,
-		"documents": documents,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
-	resp, err := c.httpClient.Post(
-		strings.TrimRight(aiURL, "/")+"/build-bm25-index",
-		"application/json",
-		bytes.NewReader(reqBody),
-	)
-	if err != nil {
-		return fmt.Errorf("execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("AI service error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
-}

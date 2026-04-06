@@ -1,6 +1,6 @@
 services:
   # ============================================================================
-  # VECTOR DATABASE
+  # DATABASES
   # ============================================================================
 
   qdrant:
@@ -8,20 +8,19 @@ services:
     container_name: chatbot-qdrant
     restart: unless-stopped
     ports:
-      - "${QDRANT_PORT_REST}:6333"   # REST API
-      - "${QDRANT_PORT_GRPC}:6334"   # gRPC
+      - "${QDRANT_PORT_REST}:6333"
+      - "${QDRANT_PORT_GRPC}:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
 
-  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: chatbot-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: chatbot
-      POSTGRES_USER: chatbot
-      POSTGRES_PASSWORD: chatbot_password
+      POSTGRES_DB: ${POSTGRES_DB:-chatbot}
+      POSTGRES_USER: ${POSTGRES_USER:-chatbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatbot_password}
     ports:
       - "5432:5432"
     volumes:
@@ -34,6 +33,33 @@ services:
       retries: 5
 
   # ============================================================================
+  # LLM SERVER (llama.cpp с OpenAI-совместимым API)
+  # ============================================================================
+
+  llama-cpp:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: chatbot-llama-cpp
+    restart: unless-stopped
+    volumes:
+      - ./models:/models
+    ports:
+      - "${LLAMA_CPP_PORT:-8090}:8080"
+    command: >
+      --model /models/${GGUF_MODEL_FILE:-qwen3-4b-q4_k_m.gguf}
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size ${N_CTX:-32768}
+      --threads ${N_THREADS:-6}
+      --n-gpu-layers ${N_GPU_LAYERS:-0}
+      --parallel ${LLAMA_PARALLEL:-2}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ============================================================================
   # MICROSERVICES
   # ============================================================================
 
@@ -44,12 +70,8 @@ services:
     container_name: chatbot-ai-service
     restart: unless-stopped
     environment:
-      # AI Model Configuration
+      LLAMA_SERVER_URL: http://llama-cpp:8080
       GGUF_MODEL_PATH: ${GGUF_MODEL_PATH}
-      N_THREADS: ${N_THREADS}
-      N_CTX: ${N_CTX}
-      
-      # Generation Parameters
       GEN_MAX_NEW_TOKENS: ${GEN_MAX_NEW_TOKENS}
       GEN_TEMPERATURE: ${GEN_TEMPERATURE}
       GEN_TOP_P: ${GEN_TOP_P}
@@ -57,25 +79,28 @@ services:
       GEN_DO_SAMPLE: ${GEN_DO_SAMPLE}
       GEN_SYSTEM_BASE_PROMPT: ${GEN_SYSTEM_BASE_PROMPT}
       GEN_USER_PROMPT: ${GEN_USER_PROMPT}
-      
-      # Embeddings Configuration
+      GEN_STOP_SEQUENCES: ${GEN_STOP_SEQUENCES}
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
-      EMBEDDING_CACHE_FOLDER: /app/models/embedding
-      
-      # Hybrid Search Configuration
+      EMBEDDING_CACHE_FOLDER: ${EMBEDDING_CACHE_FOLDER}
+      USE_RERANKER: ${USE_RERANKER}
+      RERANKER_MODEL_NAME: ${RERANKER_MODEL_NAME}
       USE_HYBRID_SEARCH: ${USE_HYBRID_SEARCH}
-      BM25_WEIGHT: ${BM25_WEIGHT}
-      VECTOR_WEIGHT: ${VECTOR_WEIGHT}
+      USE_QUERY_EXPANSION: ${USE_QUERY_EXPANSION}
+      QUERY_EXPANSION_COUNT: ${QUERY_EXPANSION_COUNT}
+      USE_CONTEXTUAL_COMPRESSION: ${USE_CONTEXTUAL_COMPRESSION}
+      RELEVANCE_ESCALATION_THRESHOLD: ${RELEVANCE_ESCALATION_THRESHOLD}
+      EMBEDDING_SIMILARITY_AUTOPASS: ${EMBEDDING_SIMILARITY_AUTOPASS}
     ports:
       - "${AI_SERVICE_PORT}:8000"
-    volumes:
-      - ./services/python-ai/models:/app/models
+    depends_on:
+      llama-cpp:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 30s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 30
+      start_period: 120s
 
   document-parser:
     build:
@@ -95,9 +120,10 @@ services:
       - "${DOCUMENT_PARSER_PORT}:8081"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/health || exit 1"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 10s
 
   vector-db:
     build:
@@ -122,9 +148,10 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8082/health || exit 1"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 10s
 
   backend:
     build:
@@ -133,26 +160,18 @@ services:
     container_name: chatbot-backend
     restart: unless-stopped
     environment:
-      # Server Configuration
       PORT: ${BACKEND_PORT}
-      
-      # Database Configuration
-      DATABASE_URL: postgresql://chatbot:chatbot_password@postgres:5432/chatbot?sslmode=disable
-      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
-      
-      # Microservices URLs
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
       DOC_PARSER_URL: ${DOC_PARSER_URL}
       VECTOR_URL: ${VECTOR_URL}
       AI_URL: ${AI_URL}
-      
-      # RAG Configuration
       CHUNK_SIZE: ${CHUNK_SIZE}
       CHUNK_OVERLAP: ${CHUNK_OVERLAP}
       RAG_MAX_DOC_CHARS: ${RAG_MAX_DOC_CHARS}
       RAG_MAX_RESULTS: ${RAG_MAX_RESULTS}
       RAG_SCORE_THRESHOLD: ${RAG_SCORE_THRESHOLD}
-      
-      # Generation Defaults
+      RAG_MAX_CONTEXT_CHARS: ${RAG_MAX_CONTEXT_CHARS}
       GEN_MAX_NEW_TOKENS: ${GEN_MAX_NEW_TOKENS}
       GEN_TEMPERATURE: ${GEN_TEMPERATURE}
       GEN_TOP_P: ${GEN_TOP_P}
@@ -160,16 +179,11 @@ services:
       GEN_DO_SAMPLE: ${GEN_DO_SAMPLE}
       GEN_SYSTEM_BASE_PROMPT: ${GEN_SYSTEM_BASE_PROMPT}
       GEN_USER_PROMPT: ${GEN_USER_PROMPT}
-      
-      # HTTP Client Settings
       HTTP_TIMEOUT_SEC: ${HTTP_TIMEOUT_SEC}
-      
-      # CORS Settings
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
       CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS}
       CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS}
-      
-      # Logging
       LOG_LEVEL: ${LOG_LEVEL}
     ports:
       - "${BACKEND_PORT}:8080"
@@ -177,11 +191,11 @@ services:
       postgres:
         condition: service_healthy
       document-parser:
-        condition: service_started
+        condition: service_healthy
       vector-db:
-        condition: service_started
+        condition: service_healthy
       ai-service:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
       interval: 30s

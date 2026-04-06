@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 // Token management
 export const getToken = () => localStorage.getItem('token')
@@ -117,7 +117,7 @@ export const publicChatAPI = {
       },
       body: JSON.stringify({
         query,
-        limit: 3,
+        limit: 60,
         ...settings,
       }),
     })

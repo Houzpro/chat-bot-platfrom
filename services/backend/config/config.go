@@ -14,6 +14,8 @@ type Config struct {
 	RAG        RAGConfig
 	HTTPClient HTTPClientConfig
 	Generation models.GenerationDefaults
+	Upload     UploadConfig
+	CORS       CORSConfig
 }
 
 type ServerConfig struct {
@@ -33,10 +35,22 @@ type RAGConfig struct {
 	MaxContextChars int
 	MaxResults      int
 	ScoreThreshold  float64
+	ContextTimeout  time.Duration
 }
 
 type HTTPClientConfig struct {
 	Timeout time.Duration
+}
+
+type UploadConfig struct {
+	MaxFileSize    int64
+	AllowedExtensions []string
+}
+
+type CORSConfig struct {
+	AllowOrigins string
+	AllowMethods string
+	AllowHeaders string
 }
 
 // Load loads configuration from environment variables with validation
@@ -57,9 +71,19 @@ func Load() (*Config, error) {
 			MaxContextChars: getEnvInt("RAG_MAX_CONTEXT_CHARS", 16000),
 			MaxResults:      getEnvInt("RAG_MAX_RESULTS", 100),
 			ScoreThreshold:  getEnvFloat("RAG_SCORE_THRESHOLD", 0.5),
+			ContextTimeout:  time.Duration(getEnvInt("RAG_CONTEXT_TIMEOUT_SEC", 45)) * time.Second,
 		},
 		HTTPClient: HTTPClientConfig{
 			Timeout: time.Duration(getEnvInt("HTTP_TIMEOUT_SEC", 0)) * time.Second,
+		},
+		Upload: UploadConfig{
+			MaxFileSize:    int64(getEnvInt("MAX_FILE_SIZE", 104857600)), // 100MB default
+			AllowedExtensions: []string{".pdf", ".txt", ".docx", ".doc", ".csv", ".xlsx", ".json", ".md", ".html"},
+		},
+		CORS: CORSConfig{
+			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
+			AllowMethods: getEnv("CORS_ALLOW_METHODS", "GET,POST,PUT,DELETE,OPTIONS"),
+			AllowHeaders: getEnv("CORS_ALLOW_HEADERS", "Origin,Content-Type,Accept,Authorization"),
 		},
 		Generation: models.GenerationDefaults{
 			MaxNewTokens: getEnvInt("GEN_MAX_NEW_TOKENS", 0),

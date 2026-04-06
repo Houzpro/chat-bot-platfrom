@@ -190,7 +190,11 @@ func (h *VectorDBHandler) ListDocuments(c *fiber.Ctx) error {
 		})
 	}
 	limit := c.QueryInt("limit", 10)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	timeout := 10 * time.Second
+	if limit > 100 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	documents, err := h.qdrant.ListDocuments(ctx, botID, limit)
 	if err != nil {

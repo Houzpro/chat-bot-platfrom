@@ -5,28 +5,31 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Базовые зависимости для сборки некоторых пакетов и определения типов файлов
-ARG APT_RETRIES=5
-RUN set -eux; \
-    apt-get -o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=30 update; \
-    apt-get -o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=30 install -y --no-install-recommends \
-        build-essential \
-        libmagic1 \
-    || apt-get -o Acquire::Retries=${APT_RETRIES} -o Acquire::http::Timeout=30 install -y --no-install-recommends --fix-missing \
-        build-essential \
-        libmagic1; \
-    rm -rf /var/lib/apt/lists/*
+# PyTorch CPU-only (для sentence-transformers)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Копируем код приложения
+# NLTK данные при сборке
+RUN python -c "import nltk; nltk.download('punkt_tab', quiet=True)"
+
+# Скачиваем embedding и reranker модели при сборке образа,
+# чтобы контейнер работал полностью автономно без интернета
+ARG EMBEDDING_MODEL=intfloat/multilingual-e5-base
+ARG RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+
+ENV SENTENCE_TRANSFORMERS_HOME=/app/models/transformers
+
+RUN python -c "\
+from sentence_transformers import SentenceTransformer, CrossEncoder; \
+SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/app/models/embedding'); \
+CrossEncoder('${RERANKER_MODEL}', max_length=512); \
+print('Models downloaded successfully')"
+
 COPY app ./app
-COPY start.sh ./start.sh
-RUN chmod +x ./start.sh
 
 EXPOSE 8000
 
-# По умолчанию запускаем uvicorn через start.sh
-CMD ["./start.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "300", "--log-level", "info"]

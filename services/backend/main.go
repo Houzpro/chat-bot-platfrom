@@ -59,10 +59,9 @@ func main() {
 	// Initialize JWT service
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		jwtSecret = auth.GenerateSecretKey()
-		log.Printf("⚠️  Generated JWT_SECRET: %s (save this for production!)", jwtSecret)
+		log.Fatal("JWT_SECRET environment variable is required")
 	}
-	jwtService := auth.NewJWTService(jwtSecret, 24*time.Hour) // 24h token expiration
+	jwtService := auth.NewJWTService(jwtSecret, 24*time.Hour)
 
 	// Create HTTP client with connection pooling and optimized settings
 	httpClient := &http.Client{
@@ -128,9 +127,9 @@ func main() {
 	}))
 
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "*",
-		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowOrigins:     cfg.CORS.AllowOrigins,
+		AllowMethods:     cfg.CORS.AllowMethods,
+		AllowHeaders:     cfg.CORS.AllowHeaders,
 		AllowCredentials: false,
 	}))
 
@@ -160,8 +159,8 @@ func main() {
 	// Document upload (owner only)
 	protected.Post("/bots/:id/documents/upload", h.UploadDocumentForBot)
 
-	// RAG chat (owner or with bot_id)
-	protected.Post("/chat/rag", h.RAGChat) // Legacy support
+	// RAG chat
+	protected.Post("/chat/rag", h.RAGChat)
 
 	// Graceful shutdown setup
 	quit := make(chan os.Signal, 1)

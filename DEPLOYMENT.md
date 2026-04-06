@@ -1,272 +1,233 @@
-# 🚀 Запуск RAG Chat Platform
+# Запуск RAG Chat Platform
+
+## Требования
+
+- Docker и Docker Compose v2
+- 8 GB RAM минимум (16 GB рекомендуется)
+- 10 GB свободного места
+- GGUF модель в директории `models/`
+- Опционально: NVIDIA GPU + nvidia-container-toolkit
 
 ## Быстрый старт
 
+### 1. Скачайте модель
+
 ```bash
-# Клонируйте репозиторий
-git clone <repo-url>
-cd chat-bot-platfrom
-
-# Запустите все сервисы
-docker-compose up -d --build
-
-# Дождитесь запуска (30-60 секунд)
-docker-compose ps
+mkdir -p models
+# Скачайте GGUF модель, например:
+# https://huggingface.co/Qwen/Qwen3-4B-GGUF
+# Поместите файл в models/qwen3-4b-q4_k_m.gguf
 ```
+
+### 2. Запустите
+
+```bash
+# CPU режим
+docker compose up -d --build
+
+# GPU режим (NVIDIA)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+### 3. Дождитесь готовности (1-2 минуты)
+
+```bash
+docker compose ps
+# Все сервисы должны быть healthy/running
+```
+
+### 4. Откройте в браузере
+
+http://localhost:3000
+
+---
 
 ## Доступ к сервисам
 
 | Сервис | URL | Описание |
 |--------|-----|----------|
-| **Frontend** | http://localhost:3000 | React UI с настройками модели |
-| **Backend API** | http://localhost:8080 | API Gateway |
-| **AI Service** | http://localhost:8000 | LLM генерация |
-| **Qdrant UI** | http://localhost:6333/dashboard | Векторная БД |
-| **Document Parser** | http://localhost:8081 | Парсинг документов |
-| **Vector DB Service** | http://localhost:8082 | Векторный поиск |
+| Frontend | http://localhost:3000 | React UI |
+| Backend API | http://localhost:8080 | API Gateway |
+| AI Service | http://localhost:8000 | RAG pipeline |
+| llama.cpp API | http://localhost:8090 | LLM inference |
+| Qdrant Dashboard | http://localhost:6333/dashboard | Vector DB UI |
 
-## Использование Frontend
+---
+
+## Использование
+
+### Регистрация и вход
 
 1. Откройте http://localhost:3000
-2. Сгенерируется автоматический Client ID (или введите свой)
-3. Загрузите документ через drag & drop
-4. Задавайте вопросы в чате
+2. Зарегистрируйте аккаунт (email + пароль)
+3. Войдите в систему
+
+### Создание бота
+
+1. Нажмите "Create Bot"
+2. Укажите имя, описание, system prompt
+3. Настройте параметры генерации (temperature, top_p, etc.)
+4. Загрузите документы (drag & drop)
+5. Сохраните
+
+### Чат
+
+- **Через Dashboard** — нажмите "Open Chat" на карточке бота
+- **Публичный URL** — скопируйте ссылку и поделитесь (работает без авторизации)
 
 ### Настройка параметров модели
 
-Нажмите ⚙️ в правом верхнем углу для настройки:
+В чате нажмите иконку настроек для изменения:
+- Temperature (0-2)
+- Top P (0-1)
+- Top K (1-100)
+- Max New Tokens
+- System Prompt
 
-- **Temperature** (0-2): Случайность ответов
-- **Top P** (0-1): Nucleus sampling
-- **Top K** (1-100): Ограничение выбора токенов
-- **Max New Tokens** (32-2048): Длина ответа
-- **Do Sample**: Включить/выключить sampling
-- **System Prompt**: Роль и поведение AI
-
-## Архитектура
-
-```
-┌──────────────┐
-│   Frontend   │ :3000 (nginx + React)
-│   (Docker)   │
-└──────┬───────┘
-       │
-       ▼
-┌──────────────────────────────┐
-│  Backend Gateway (Go)        │ :8080
-└───┬─────────┬──────────┬─────┘
-    │         │          │
-    ▼         ▼          ▼
-┌─────────┐ ┌────────┐ ┌──────────┐
-│Document │ │Vector  │ │AI Service│
-│Parser   │ │DB Svc  │ │(Python)  │
-│:8081    │ │:8082   │ │:8000     │
-└─────────┘ └───┬────┘ └──────────┘
-                │
-                ▼
-           ┌─────────┐
-           │ Qdrant  │ :6333/:6334
-           └─────────┘
-```
+---
 
 ## Управление
 
-### Просмотр логов
+### Логи
 
 ```bash
-# Все сервисы
-docker-compose logs -f
-
-# Конкретный сервис
-docker-compose logs -f frontend
-docker-compose logs -f backend
-docker-compose logs -f ai-service
+docker compose logs -f                  # Все сервисы
+docker compose logs -f backend          # Backend
+docker compose logs -f ai-service       # AI Service
+docker compose logs -f llama-cpp        # LLM Server
 ```
 
-### Перезапуск сервисов
+### Перезапуск
 
 ```bash
-# Все сервисы
-docker-compose restart
-
-# Только frontend после изменений
-docker-compose up -d --build frontend
-
-# Только backend после изменений Go кода
-docker-compose up -d --build backend
+docker compose restart                  # Все
+docker compose restart ai-service       # Один сервис
+docker compose up -d --build frontend   # Пересборка
 ```
 
 ### Остановка
 
 ```bash
-# Остановить все
-docker-compose down
-
-# Остановить и удалить volumes (БД очистится)
-docker-compose down -v
+docker compose down                     # Остановить
+docker compose down -v                  # Остановить + удалить данные
 ```
 
-## Интеграционное тестирование
+### Статус
 
 ```bash
-# Запустить тесты
-./test-integration.sh
-
-# С кастомным URL
-BASE_URL=http://localhost:8080 ./test-integration.sh
+docker compose ps                       # Статус контейнеров
+docker stats                            # Использование ресурсов
+curl http://localhost:8080/health        # Health check
 ```
 
-Тесты проверяют:
-- ✅ Health check всех сервисов
-- ✅ Загрузку документов
-- ✅ Векторный поиск
-- ✅ RAG генерацию с streaming
+---
 
-## Разработка
+## GPU ускорение
 
-### Frontend (React)
+### Установка
+
+1. Установите [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+2. Запустите с GPU override:
 
 ```bash
-cd frontend
-
-# Dev режим (hot reload)
-npm run dev
-
-# Сборка
-npm run build
-
-# Preview production build
-npm run preview
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```
 
-### Backend (Go)
+GPU override автоматически:
+- Использует образ `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Устанавливает `N_GPU_LAYERS=-1` (все слои на GPU)
+- Резервирует NVIDIA GPU устройство
+
+### Проверка
 
 ```bash
-cd services/backend
-
-# Локальный запуск
-go run main.go
-
-# Сборка
-go build -o backend main.go
+docker compose logs llama-cpp | grep -i gpu
+# Должно показать загрузку слоев на GPU
 ```
 
-### AI Service (Python)
-
-```bash
-cd services/python-ai
-
-# Установка зависимостей
-pip install -r requirements.txt
-
-# Локальный запуск
-./start.sh
-```
+---
 
 ## Конфигурация
 
-Переменные окружения в `.env`:
+Все параметры в файле `.env`. Подробности: [CONFIGURATION.md](CONFIGURATION.md)
+
+### Ключевые параметры
 
 ```bash
 # Модель
-GGUF_MODEL_PATH=./models/qwen2.5-3b-instruct-q4_k_m.gguf
+GGUF_MODEL_FILE=qwen3-4b-q4_k_m.gguf
 N_THREADS=6
-N_CTX=4096
+N_CTX=32768
 
-# Генерация по умолчанию
-GEN_MAX_NEW_TOKENS=256
-GEN_TEMPERATURE=0.7
-GEN_TOP_P=0.9
-GEN_TOP_K=50
+# Генерация
+GEN_MAX_NEW_TOKENS=8192
+GEN_TEMPERATURE=0.75
 
 # RAG
-RAG_TOP_K_DOCS=3
-RAG_MAX_DOC_CHARS=400
-
-# Document parsing
-CHUNK_SIZE=400
-CHUNK_OVERLAP=80
+CHUNK_SIZE=1200
+RAG_MAX_RESULTS=60
 ```
+
+---
 
 ## Troubleshooting
 
-### Frontend не открывается
+### llama.cpp не запускается
 
 ```bash
-# Проверить статус
-docker-compose ps frontend
+docker compose logs llama-cpp
+# Проверьте наличие модели:
+ls -lh models/*.gguf
+# Проверьте имя файла в .env:
+grep GGUF_MODEL_FILE .env
+```
 
-# Посмотреть логи
-docker-compose logs frontend
+### AI Service не подключается к llama.cpp
 
-# Перезапустить
-docker-compose restart frontend
+```bash
+docker compose logs ai-service
+# llama.cpp должен быть healthy:
+docker compose ps llama-cpp
+# Проверьте health:
+curl http://localhost:8090/health
 ```
 
 ### Backend ошибки
 
 ```bash
-# Проверить что все микросервисы запущены
-docker-compose ps
-
-# Проверить логи
-docker-compose logs backend
-
-# Проверить health check
+docker compose logs backend
 curl http://localhost:8080/health
+# Проверьте что все зависимости запущены:
+docker compose ps
 ```
 
-### Модель не загружается
+### Медленная генерация
 
-```bash
-# Проверить наличие модели
-ls -lh services/python-ai/models/*.gguf
-
-# Проверить логи AI сервиса
-docker-compose logs ai-service
-
-# Дождаться загрузки (может занять 1-2 минуты)
-docker-compose logs -f ai-service
-```
+1. Используйте GPU: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`
+2. Увеличьте `N_THREADS` в `.env`
+3. Используйте меньшую модель
+4. Уменьшите `N_CTX`
 
 ### Порты заняты
 
-Измените порты в `docker-compose.yml`:
+Измените порты в `.env`:
 
-```yaml
-ports:
-  - "3001:80"  # Frontend на :3001
-  - "8090:8080"  # Backend на :8090
+```bash
+BACKEND_PORT=8081
+FRONTEND_PORT=3001
+LLAMA_CPP_PORT=8091
 ```
 
-## Производительность
-
-- **Модель**: Qwen2.5-3B Q4_K_M (2.0 GB)
-- **Скорость**: 70-90 токенов/сек на CPU
-- **Контекст**: 4096 токенов
-- **Потоки**: 6 CPU threads
-
-### Ускорение
-
-Для увеличения производительности:
-
-1. Увеличить `N_THREADS` в `.env`
-2. Использовать GPU (требует CUDA)
-3. Использовать меньшую модель
+---
 
 ## Технологии
 
-- **Frontend**: React 18, Vite, Lucide Icons
-- **Backend**: Go, Fiber v2
-- **AI**: Python, FastAPI, llama-cpp-python
-- **Vector DB**: Qdrant
-- **Embeddings**: sentence-transformers
+- **Frontend**: React 18, Vite, Nginx, Lucide Icons
+- **Backend**: Go 1.24, Fiber v2
+- **AI Service**: Python 3.10, FastAPI, sentence-transformers
+- **LLM Server**: llama.cpp (OpenAI-compatible API)
+- **Vector DB**: Qdrant (gRPC)
+- **Database**: PostgreSQL 15
+- **Auth**: JWT (bcrypt)
 - **Streaming**: Server-Sent Events (SSE)
-- **Containerization**: Docker, Docker Compose
-
-## Документация
-
-- [Frontend README](frontend/README.md) - Детали React приложения
-- [Backend README](services/backend/README.md) - API документация
-- [AI Service README](services/python-ai/README.md) - LLM сервис
-- [RAG Documentation](docs/RAG_DOCUMENTATION.md) - Полная RAG документация
+- **Containerization**: Docker Compose

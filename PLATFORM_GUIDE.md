@@ -1,113 +1,135 @@
-# 🤖 RAG Chat Platform - Полное руководство
+# RAG Chat Platform - Полное руководство
 
-## 📋 Содержание
+## Содержание
 
 - [Обзор платформы](#обзор-платформы)
 - [Архитектура](#архитектура)
 - [Микросервисы](#микросервисы)
-- [Быстрый старт](#быстрый-старт)
-- [Конфигурация](#конфигурация)
 - [RAG Pipeline](#rag-pipeline)
+- [Автономная работа](#автономная-работа)
 - [API Documentation](#api-documentation)
+- [База данных](#база-данных)
 - [Разработка](#разработка)
-- [Deployment](#deployment)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Обзор платформы
 
-**RAG Chat Platform** — это микросервисная платформа для интеллектуального чата с документами на базе RAG (Retrieval-Augmented Generation).
+RAG Chat Platform — микросервисная платформа для интеллектуального чата с документами. Пользователи регистрируются, создают ботов с индивидуальными настройками, загружают документы и получают ответы на вопросы по их содержимому.
 
 ### Ключевые возможности
 
-✅ **Загрузка документов** - PDF, DOCX, TXT, CSV, JSON, HTML, Markdown  
-✅ **Векторный поиск** - Семантический поиск по содержимому через Qdrant  
-✅ **RAG генерация** - Ответы на основе контекста из документов  
-✅ **Streaming** - Потоковая генерация ответов в реальном времени  
-✅ **Настройки модели** - Полный контроль параметров генерации через UI  
-✅ **CPU-оптимизированная** - Работает на CPU с GGUF моделями  
+- **Multi-user** - регистрация, JWT-аутентификация, управление ботами
+- **Загрузка документов** - PDF, DOCX, TXT, CSV, JSON, HTML, Markdown, XLSX
+- **Advanced RAG** - Agentic Router, tiered retrieval, hybrid search, cosine re-ranking, self-correction
+- **Streaming** - потоковая генерация ответов через SSE
+- **GPU ускорение** - llama.cpp server с CUDA через Docker
+- **Публичный чат** - доступ к боту по URL без авторизации
+- **Настраиваемые боты** - temperature, top_p, top_k, max tokens, system prompt через UI
+- **Полная автономность** - все модели (LLM, embedding, reranker) встроены в Docker-образы, интернет не требуется после сборки
 
 ### Технологический стек
 
 | Компонент | Технология |
 |-----------|------------|
-| Frontend | React 18 + Vite |
-| Backend Gateway | Go 1.23 + Fiber |
+| Frontend | React 18 + Vite + Nginx |
+| Backend Gateway | Go 1.24 + Fiber v2 |
 | Document Parser | Go 1.24 |
-| Vector DB Service | Go 1.23 + Qdrant gRPC |
-| AI Service | Python 3.10 + FastAPI + llama-cpp-python |
+| Vector DB Service | Go 1.24 + Qdrant gRPC |
+| AI Service | Python 3.10 + FastAPI + httpx |
+| LLM Server | llama.cpp (Docker, OpenAI API) |
 | Vector DB | Qdrant |
-| Embeddings | sentence-transformers |
-| LLM | Qwen3-4B (GGUF) |
+| Embeddings | intfloat/multilingual-e5-base (768D) |
+| Reranker | cross-encoder/ms-marco-MiniLM-L-6-v2 |
+| Database | PostgreSQL 15 |
+| LLM | Qwen3-4B (GGUF, формат настраивается) |
 
 ---
 
 ## Архитектура
 
-### Высокоуровневая диаграмма
+### Диаграмма
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Frontend (React)                      │
-│                     http://localhost:3000                    │
-│  - Drag & Drop загрузка файлов                              │
-│  - Чат интерфейс с streaming                                │
-│  - Настройки параметров модели                              │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ HTTP/SSE
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Backend Gateway (Go) :8080                      │
-│  - Точка входа для всех клиентских запросов                │
-│  - Оркестрация между микросервисами                         │
-│  - CORS, валидация, обработка ошибок                        │
-└──┬──────────────────┬───────────────────┬──────────────────┘
-   │                  │                   │
-   │ HTTP             │ HTTP              │ HTTP
-   ▼                  ▼                   ▼
-┌─────────────┐  ┌──────────────┐  ┌────────────────┐
-│ Document    │  │  Vector DB   │  │  AI Service    │
-│  Parser     │  │   Service    │  │   (Python)     │
-│  (Go)       │  │    (Go)      │  │    :8000       │
-│  :8081      │  │    :8082     │  │                │
-└─────────────┘  └──────┬───────┘  └────────────────┘
-                        │ gRPC
-                        ▼
-                 ┌─────────────┐
-                 │   Qdrant    │
-                 │ (Vector DB) │
-                 │ :6333/:6334 │
-                 └─────────────┘
++-----------------------------------------------------------+
+|                   Frontend (React + Nginx)                  |
+|                     http://localhost:3000                    |
++-----------------------------+-------------------------------+
+                              | HTTP/SSE
+                              v
++-----------------------------------------------------------+
+|              Backend Gateway (Go + Fiber) :8080             |
+|   Auth, CORS, Rate Limiting, RAG Orchestration              |
++------+------------------+------------------+---------------+
+       |                  |                  |
+       v                  v                  v
++-------------+   +-------------+   +-----------------+
+| Document    |   | Vector DB   |   |   AI Service    |
+| Parser (Go) |   | Service(Go) |   |   (Python)      |
+| :8081       |   | :8082       |   |   :8000         |
++-------------+   +------+------+   +--------+--------+
+                         |                   |
+                         v                   v
+                  +------------+    +-----------------+
+                  |   Qdrant   |    | llama.cpp server|
+                  | :6333/6334 |    | :8090           |
+                  +------------+    +-----------------+
 ```
+
+### Разделение ответственности LLM и AI Service
+
+Платформа использует два отдельных контейнера для работы с нейросетями:
+
+| Контейнер | Роль | Модели |
+|-----------|------|--------|
+| **llama-cpp** | LLM inference (генерация текста) | Qwen3-4B GGUF (или другая модель) |
+| **ai-service** | Embeddings, RAG pipeline, reranking | multilingual-e5-base, ms-marco-MiniLM |
+
+**llama-cpp** — это чистый LLM сервер на C++ с OpenAI-совместимым API (`/v1/chat/completions`). Он загружает GGUF модель и выполняет inference. Может работать на CPU или GPU.
+
+**ai-service** — Python сервис, который:
+- Создает embeddings для документов и запросов (sentence-transformers)
+- Выполняет semantic chunking документов
+- Реализует Advanced RAG pipeline (agentic router, hybrid search, reranking)
+- Проксирует запросы генерации к llama-cpp через HTTP (httpx)
+
+AI Service не загружает LLM модель — он обращается к llama-cpp server по HTTP.
 
 ### Потоки данных
 
-#### 1. Загрузка документа
+#### Загрузка документа
 
 ```
-Client → Backend → Document Parser
-          ↓ (text)
-       Backend → AI Service (create embeddings)
-          ↓ (vectors)
-       Backend → Vector DB Service → Qdrant
-          ↓ (store vectors)
-       Backend → Client (success)
+Пользователь -> Frontend -> Backend -> Document Parser (парсинг файла)
+                                    -> AI Service (semantic chunking + создание embeddings)
+                                    -> Vector DB Service -> Qdrant (сохранение векторов)
 ```
 
-#### 2. RAG запрос
+#### RAG запрос (Advanced)
 
 ```
-Client → Backend (query)
-          ↓
-       Backend → AI Service (embed query)
-          ↓ (query_vector)
-       Backend → Vector DB Service → Qdrant (search)
-          ↓ (top-k documents)
-       Backend → AI Service (generate with context)
-          ↓ (streaming tokens via SSE)
-       Backend → Client (stream response)
+Пользователь -> Frontend -> Backend -> AI Service (embed запроса)
+                                    -> Vector DB Service (векторный поиск)
+                                    -> AI Service (advanced search: reranking, hybrid, self-correction)
+                                    -> AI Service -> llama.cpp (генерация с контекстом, streaming)
+                                    <- SSE streaming обратно пользователю
 ```
+
+### Порядок запуска и зависимости
+
+Все зависимости контролируются через `depends_on` с `condition: service_healthy`:
+
+```
+postgres (healthcheck) ─────────────────┐
+qdrant ──> vector-db (healthcheck) ─────┤
+llama-cpp (healthcheck) ──> ai-service (healthcheck) ──┤
+                    document-parser (healthcheck) ──┤
+                                                    v
+                                              backend ──> frontend
+```
+
+Backend не запустится, пока все зависимые сервисы не пройдут healthcheck. AI Service ожидает готовности llama-cpp server перед стартом.
 
 ---
 
@@ -115,836 +137,414 @@ Client → Backend (query)
 
 ### 1. Frontend (React + Nginx)
 
-**Порт:** 3000  
-**Технологии:** React 18, Vite, CSS Modules  
+**Порт:** 3000 | **Контейнер:** `chatbot-frontend`
 
-**Ответственность:**
-- Пользовательский интерфейс
-- Drag & Drop загрузка файлов
-- Чат с streaming ответами
-- Настройки параметров модели (temperature, top_p, top_k, max_tokens)
-- Управление client_id
+Компоненты:
+- `Auth.jsx` — обёртка аутентификации
+- `Login.jsx` — форма входа/регистрации
+- `Dashboard.jsx` — список ботов пользователя
+- `BotForm.jsx` — создание/редактирование бота (загружает дефолты с сервера)
+- `BotChat.jsx` — чат с ботом (streaming SSE)
+- `ChatArea.jsx` — область сообщений чата
+- `ModelSettings.jsx` — настройки параметров генерации (temperature, top_p, top_k, max tokens)
+- `FileUpload.jsx` — загрузка документов (drag & drop)
+- `DocumentSearch.jsx` — поиск по документам бота
 
-**Основные компоненты:**
-- `App.jsx` - главный компонент, state management
-- `ChatArea.jsx` - область чата с сообщениями
-- `FileUpload.jsx` - загрузка файлов
-- `ModelSettings.jsx` - настройки генерации
-- `DocumentSearch.jsx` - поиск по документам
+### 2. Backend Gateway (Go + Fiber)
 
-**Build:**
-```bash
-cd frontend
-npm install
-npm run build  # → dist/
-```
+**Порт:** 8080 | **Контейнер:** `chatbot-backend`
 
----
+- API Gateway для всех запросов
+- JWT-аутентификация и middleware
+- Оркестрация RAG pipeline (координирует Document Parser, Vector DB, AI Service)
+- CRUD операции для ботов
+- Rate limiting (100 req/min per IP)
+- SSE streaming проксирование
+- Конфигурация полностью из `.env` (CORS, upload limits, timeouts)
 
-### 2. Backend Gateway (Go)
+### 3. Document Parser (Go)
 
-**Порт:** 8080  
-**Файлы:** `services/backend/`  
-**Framework:** Fiber v2  
+**Порт:** 8081 | **Контейнер:** `chatbot-document-parser`
 
-**Ответственность:**
-- API Gateway для всех клиентских запросов
-- Оркестрация между микросервисами
-- RAG pipeline: parse → embed → search → generate
-- Streaming SSE для генерации
-- Валидация и обработка ошибок
+Парсинг документов в текст: PDF, DOCX, TXT, JSON, CSV, XLSX, HTML, Markdown.
 
-**Основные эндпоинты:**
+### 4. Vector DB Service (Go + Qdrant gRPC)
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| GET | `/health` | Health check |
-| POST | `/api/v1/documents/upload` | Загрузка документа |
-| POST | `/api/v1/search` | Поиск по векторной БД |
-| POST | `/api/v1/chat/rag` | RAG чат (streaming) |
+**Порт:** 8082 | **Контейнер:** `chatbot-vector-db`
 
-**Конфигурация:**
-```go
-type Config struct {
-    Server     ServerConfig
-    Services   ServicesConfig  // URLs микросервисов
-    RAG        RAGConfig       // Параметры RAG
-    Generation GenerationDefaults
-}
-```
-
-**Зависимости:**
-- Document Parser Service
-- Vector DB Service  
-- AI Service
-
----
-
-### 3. Document Parser Service (Go)
-
-**Порт:** 8081  
-**Файлы:** `services/document-parser-service/`  
-
-**Ответственность:**
-- Парсинг документов различных форматов
-- Извлечение текста из файлов
-- Поддержка форматов: PDF, DOCX, TXT, JSON, CSV, XLSX, HTML, Markdown
-
-**API:**
-```bash
-POST /parse
-Content-Type: multipart/form-data
-- file: <binary>
-
-Response:
-{
-  "content": "Extracted text...",
-  "metadata": {
-    "filename": "doc.pdf",
-    "size": 12345,
-    "format": "pdf"
-  }
-}
-```
-
-**Библиотеки:**
-- PDF: `pdfcpu`
-- DOCX: `docx` parser
-- Excel: `xlsx` reader
-- HTML: `goquery`
-
----
-
-### 4. Vector DB Service (Go)
-
-**Порт:** 8082  
-**Файлы:** `services/vector-db-service/`  
-
-**Ответственность:**
-- Работа с Qdrant через gRPC
-- Управление коллекциями (по client_id)
-- Векторный поиск (cosine similarity)
-- Хранение и удаление документов
-
-**API:**
-
-```bash
-# Создать коллекцию
-POST /collections/ensure
-{
-  "client_id": "user123",
-  "vector_size": 384
-}
-
-# Добавить документы
-POST /documents/add
-{
-  "client_id": "user123",
-  "documents": [
-    {
-      "id": "doc1",
-      "vector": [0.1, 0.2, ...],
-      "text": "content",
-      "metadata": {...}
-    }
-  ]
-}
-
-# Поиск
-POST /documents/search
-{
-  "client_id": "user123",
-  "query_vector": [0.1, 0.2, ...],
-  "limit": 3
-}
-
-# Удалить все документы клиента
-DELETE /documents/delete/{client_id}
-```
-
-**Qdrant схема:**
-- **Collection name:** `rag_collection_{client_id}`
-- **Vector size:** 384 (для paraphrase-multilingual-MiniLM-L12-v2)
-- **Distance:** Cosine
-- **Payload:** `{text: string, filename: string, chunk_id: int, ...}`
-
----
+- Управление коллекциями по bot_id (коллекция `bot_{uuid}`)
+- Добавление, поиск, удаление документов
+- Cosine similarity через gRPC
 
 ### 5. AI Service (Python + FastAPI)
 
-**Порт:** 8000  
-**Файлы:** `services/python-ai/`  
-**Framework:** FastAPI + Uvicorn  
+**Порт:** 8000 | **Контейнер:** `chatbot-ai-service`
 
-**Ответственность:**
-- LLM генерация (Qwen3-4B GGUF через llama-cpp-python)
-- Создание embeddings (sentence-transformers)
-- Streaming генерация через SSE
-- Обработка параметров генерации
+- Создание embeddings (multilingual-e5-base, 768D, с `passage:` / `query:` prefix)
+- Semantic chunking (RecursiveCharacterTextSplitter)
+- Advanced RAG: Agentic Router, hybrid search, cosine re-ranking, self-correction, window retrieval
+- Проксирование генерации к llama.cpp server через httpx (OpenAI Chat API)
+- Embedding и reranker модели встроены в Docker-образ при сборке
 
-**API:**
+**Внутренние endpoints AI Service:**
 
-```bash
-# Health check
-GET /health
+| Endpoint | Назначение |
+|----------|-----------|
+| `GET /health` | Health check |
+| `POST /ask` | Генерация ответа (non-streaming) |
+| `POST /generate` | Генерация ответа (streaming SSE) |
+| `POST /embeddings` | Создание embeddings для текстов |
+| `POST /advanced-search` | Advanced RAG search с reranking |
+| `POST /split-document` | Semantic chunking документа |
 
-# Создать embeddings
-POST /embeddings
-{
-  "texts": ["text1", "text2", ...]
-}
-Response: {
-  "embeddings": [[0.1, 0.2, ...], ...]
-}
+### 6. llama.cpp server (Docker)
 
-# Streaming генерация
-POST /ask
-{
-  "messages": [
-    {"role": "user", "content": "question"}
-  ],
-  "max_new_tokens": 512,
-  "temperature": 0.75,
-  "top_p": 0.92,
-  "top_k": 40,
-  "do_sample": true,
-  "system_prompt": "..."
-}
-Response: SSE stream
-data: {"type": "token", "token": "Hello"}
-data: {"type": "token", "token": " world"}
-data: {"type": "done"}
-```
+**Порт:** 8090 (внешний) / 8080 (внутренний) | **Контейнер:** `chatbot-llama-cpp`
 
-**Модели:**
+- LLM inference через OpenAI-совместимый API
+- Поддержка GGUF моделей (Qwen3, LLaMA, Mistral и др.)
+- CPU режим: `ghcr.io/ggml-org/llama.cpp:server`
+- GPU режим: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Параллельные слоты для обработки нескольких запросов (`LLAMA_PARALLEL`)
 
-| Файл | Размер | Описание |
-|------|--------|----------|
-| `qwen2.5-3b-instruct-q4_k_m.gguf` | 2.0 GB | Быстрая |
-| `qwen3-4b-q4_k_m.gguf` | 2.4 GB | Качественнее (по умолчанию) |
+### 7. Qdrant
 
-**Embedding модель:**
-- `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
-- Размерность: 384
-- Мультиязычная (русский, английский, и др.)
+**Порты:** 6333 (REST), 6334 (gRPC) | **Контейнер:** `chatbot-qdrant`
 
-**Оптимизации:**
-- CPU inference через llama-cpp
-- Multi-threading (6 потоков по умолчанию)
-- Контекст 8192 токена
-- Streaming для быстрого отображения
+Векторная БД для хранения и семантического поиска документов. Данные хранятся в Docker volume `qdrant_storage`.
 
----
+### 8. PostgreSQL
 
-### 6. Qdrant (Vector Database)
+**Порт:** 5432 | **Контейнер:** `chatbot-postgres`
 
-**Порты:** 6333 (REST), 6334 (gRPC)  
-**Image:** `qdrant/qdrant:latest`  
-
-**Использование:**
-- Хранение векторных представлений документов
-- Быстрый семантический поиск (cosine similarity)
-- Коллекции по client_id для изоляции данных
-- Web UI: http://localhost:6333/dashboard
-
----
-
-## Быстрый старт
-
-### Предварительные требования
-
-- Docker & Docker Compose
-- 8 GB RAM минимум
-- 10 GB свободного места (для моделей)
-
-### Запуск
-
-```bash
-# 1. Клонировать репозиторий
-git clone <repo-url>
-cd chat-bot-platfrom
-
-# 2. Запустить все сервисы
-docker-compose up -d --build
-
-# 3. Дождаться запуска (30-60 секунд)
-docker-compose ps
-
-# 4. Проверить health
-curl http://localhost:8080/health
-curl http://localhost:8000/health
-
-# 5. Открыть в браузере
-open http://localhost:3000
-```
-
-### Первое использование
-
-1. **Откройте** http://localhost:3000
-2. **Client ID** сгенерируется автоматически (или введите свой)
-3. **Загрузите документ** через drag & drop
-4. **Задайте вопрос** в чате
-5. **Настройте параметры** через ⚙️ (опционально)
-
----
-
-## Конфигурация
-
-Вся конфигурация в файле **`.env`** в корне проекта.
-
-### Основные параметры
-
-```bash
-# Модель
-GGUF_MODEL_PATH=./models/qwen3-4b-q4_k_m.gguf
-N_THREADS=6                    # CPU потоки
-N_CTX=8192                     # Размер контекста
-
-# Генерация
-GEN_MAX_NEW_TOKENS=512         # Длина ответа
-GEN_TEMPERATURE=0.75           # 0.0-2.0, креативность
-GEN_TOP_P=0.92                 # Nucleus sampling
-GEN_TOP_K=40                   # Top-K sampling
-GEN_DO_SAMPLE=true             # Sampling вкл/выкл
-
-# System prompts
-GEN_SYSTEM_BASE_PROMPT="DO NOT use markdown..."
-GEN_USER_PROMPT="You are a helpful assistant..."
-
-# RAG
-RAG_TOP_K=3                    # Сколько документов искать
-RAG_MAX_DOC_CHARS=3000         # Макс символов из документа
-CHUNK_SIZE=2500                # Размер чанка
-CHUNK_OVERLAP=500              # Перекрытие чанков
-
-# Embeddings
-EMBEDDING_MODEL_NAME=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-```
-
-**Подробнее:** см. [CONFIGURATION.md](CONFIGURATION.md)
+Хранение пользователей, ботов и метаданных документов. Данные хранятся в Docker volume `postgres_data`. Схема автоматически инициализируется из `schema.sql`.
 
 ---
 
 ## RAG Pipeline
 
-### Полный цикл работы RAG
+### Advanced Agentic RAG
 
-#### Этап 1: Индексация документа
+Платформа использует продвинутый RAG pipeline:
 
-```
-1. Пользователь загружает файл (PDF/DOCX/TXT/...)
-   ↓
-2. Backend → Document Parser Service
-   - Извлекает текст из файла
-   - Возвращает plain text
-   ↓
-3. Backend разбивает текст на чанки
-   - chunk_size=2500 символов
-   - overlap=500 символов
-   - Пример: doc длиной 10000 символов → 5 чанков
-   ↓
-4. Backend → AI Service (embeddings)
-   - Запрос: POST /embeddings с массивом чанков
-   - Модель: paraphrase-multilingual-MiniLM-L12-v2
-   - Ответ: векторы размерности 384 для каждого чанка
-   ↓
-5. Backend → Vector DB Service
-   - Создает коллекцию если нужно
-   - Сохраняет векторы + текст + метаданные в Qdrant
-   - Collection: rag_collection_{client_id}
-   ↓
-6. Backend → Client (success response)
-```
+1. **Agentic Router** — классифицирует запросы: simple, global, enumeration, multi_hop, relation
+2. **Tiered Retrieval** — vector_search -> hybrid_search -> full_document_read
+3. **Window Retrieval** — подтягивание соседних чанков для полноты контекста
+4. **Cosine Re-ranking** — переранжирование по embedding similarity
+5. **Cross-Encoder Reranking** — точное переранжирование через ms-marco-MiniLM-L-6-v2
+6. **BM25 Hybrid Search** — комбинация vector + keyword search (веса настраиваются)
+7. **Self-Correction Loop** — повторные попытки с перефразировкой при низкой релевантности
+8. **Enumeration Prompts** — специальные инструкции для запросов-списков
+9. **Language Matching** — детекция языкового несоответствия query/documents
+10. **Pipeline Trace** — структурированное логирование для отладки
 
-#### Этап 2: Поиск и генерация (RAG)
+### Этапы работы
+
+#### Индексация
 
 ```
-1. Пользователь задает вопрос: "Что такое JSON?"
-   ↓
-2. Backend → AI Service (embed query)
-   - Вопрос превращается в вектор [0.1, 0.2, ..., 0.384]
-   ↓
-3. Backend → Vector DB Service (search)
-   - Ищет топ-K (default: 3) наиболее похожих чанков
-   - Метрика: cosine similarity
-   - Возвращает тексты найденных чанков
-   ↓
-4. Backend формирует контекст
-   - Собирает тексты найденных документов
-   - Обрезает до RAG_MAX_DOC_CHARS символов
-   ↓
-5. Backend → AI Service (generate)
-   - Prompt:
-     <system>You are a helpful assistant</system>
-     <context>
-     [Найденный текст из документов]
-     </context>
-     <user>Что такое JSON?</user>
-   - Параметры: temperature, top_p, top_k, max_tokens
-   ↓
-6. AI Service → Backend (streaming SSE)
-   - Генерирует токен за токеном
-   - data: {"type": "token", "token": "JSON"}
-   - data: {"type": "token", "token": " is"}
-   - ...
-   ↓
-7. Backend → Client (streaming SSE)
-   - Пересылает токены клиенту
-   - Frontend обновляет UI в реальном времени
-   ↓
-8. Завершение
-   - data: {"type": "done"}
-   - Соединение закрывается
+1. Загрузка файла -> Document Parser (извлечение текста)
+2. Semantic chunking (RecursiveCharacterTextSplitter, настраивается через CHUNK_SIZE/CHUNK_OVERLAP)
+3. Embeddings (multilingual-e5-base, 768D, с passage: prefix)
+4. Сохранение в Qdrant (коллекция bot_{uuid})
 ```
 
-### Оптимизации RAG
+#### Генерация ответа
 
-**Chunking стратегия:**
-- Большие чанки (2500 символов) → лучше контекст
-- Overlap (500 символов) → нет потери информации на границах
-- Метаданные: filename, chunk_id, timestamp
+```
+1. Запрос -> Embedding (с query: prefix)
+2. Vector search в Qdrant (до RAG_MAX_RESULTS кандидатов)
+3. Advanced Search:
+   a. Agentic Router определяет тип запроса
+   b. Tiered retrieval (vector -> hybrid -> full_document_read)
+   c. Window retrieval (соседние чанки)
+   d. Cross-encoder reranking
+   e. Self-correction при низкой релевантности (порог RELEVANCE_ESCALATION_THRESHOLD)
+4. Формирование контекста (до RAG_MAX_CONTEXT_CHARS символов)
+5. Streaming генерация через llama.cpp server (/v1/chat/completions)
+```
 
-**Поиск:**
-- Top-K=3 → баланс между качеством и скоростью
-- Cosine similarity → учитывает семантику
-- Фильтрация по client_id → изоляция данных
+---
 
-**Генерация:**
-- Streaming SSE → быстрый первый токен
-- System prompt с `/no_think` → пропуск внутренних размышлений
-- Температура 0.75 → баланс детерминизма и креативности
+## Автономная работа
+
+Платформа спроектирована для полной автономной работы без доступа к интернету после сборки Docker-образов.
+
+### Встроенные модели
+
+При сборке Docker-образа `ai-service` автоматически скачиваются и встраиваются:
+
+| Модель | Назначение | Размер |
+|--------|-----------|--------|
+| intfloat/multilingual-e5-base | Embedding (768D) | ~1.1 GB |
+| cross-encoder/ms-marco-MiniLM-L-6-v2 | Reranker | ~90 MB |
+| NLTK punkt_tab | Токенизация | ~5 MB |
+
+Модели кэшируются в образе:
+- Embedding: `/app/models/embedding`
+- Reranker и другие: `/app/models/transformers` (через `SENTENCE_TRANSFORMERS_HOME`)
+
+**LLM модель** (GGUF) монтируется из локальной директории `./models/` в контейнер llama-cpp через Docker volume.
+
+### Почему нет Docker volume для AI моделей
+
+Embedding и reranker модели встроены в Docker-образ при сборке. Docker volume `ai_models_cache` не используется, чтобы не создавать пустой overlay поверх встроенных моделей.
 
 ---
 
 ## API Documentation
 
-### Backend Gateway API
-
 Base URL: `http://localhost:8080`
 
-#### Health Check
+### Публичные эндпоинты
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/health` | Health check |
+| POST | `/api/v1/auth/register` | Регистрация |
+| POST | `/api/v1/auth/login` | Вход |
+| GET | `/api/v1/config/defaults` | Дефолтные параметры генерации |
+| GET | `/api/v1/bots/:id` | Информация о боте (публичная) |
+| POST | `/api/v1/chat/public/:bot_id` | Публичный чат (streaming SSE) |
+
+### Защищённые (Authorization: Bearer TOKEN)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/v1/auth/me` | Текущий пользователь |
+| POST | `/api/v1/bots` | Создать бота |
+| GET | `/api/v1/bots` | Список ботов |
+| PUT | `/api/v1/bots/:id` | Обновить бота |
+| DELETE | `/api/v1/bots/:id` | Удалить бота |
+| GET | `/api/v1/bots/:id/documents` | Документы бота |
+| POST | `/api/v1/bots/:id/documents/upload` | Загрузить документ (multipart/form-data) |
+| POST | `/api/v1/chat/rag` | RAG чат (streaming SSE) |
+
+### Примеры
+
+#### Регистрация
 
 ```bash
-GET /health
-
-Response 200:
-{
-  "status": "healthy",
-  "services": {
-    "document_parser": "ok",
-    "vector_db": "ok",
-    "ai_service": "ok"
-  }
-}
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "password123", "name": "User"}'
 ```
 
-#### Upload Document
+#### Создание бота
 
 ```bash
-POST /api/v1/documents/upload
-Content-Type: multipart/form-data
-
-Form data:
-- file: <binary>
-- client_id: "user123"
-
-Response 200:
-{
-  "success": true,
-  "message": "Document uploaded and indexed",
-  "chunks_created": 5,
-  "document_id": "doc_abc123"
-}
+curl -X POST http://localhost:8080/api/v1/bots \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Bot", "temperature": 0.7, "system_prompt": "You are helpful."}'
 ```
 
-#### Search Documents
+#### Загрузка документа
 
 ```bash
-POST /api/v1/search
-Content-Type: application/json
-
-Body:
-{
-  "client_id": "user123",
-  "query": "что такое JSON",
-  "limit": 3
-}
-
-Response 200:
-{
-  "documents": [
-    {
-      "text": "JSON is a data format...",
-      "score": 0.95,
-      "metadata": {
-        "filename": "doc.pdf",
-        "chunk_id": 2
-      }
-    },
-    ...
-  ]
-}
+curl -X POST http://localhost:8080/api/v1/bots/$BOT_ID/documents/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@document.pdf"
 ```
 
-#### RAG Chat (Streaming)
+#### Публичный чат (streaming)
 
 ```bash
-POST /api/v1/chat/rag
-Content-Type: application/json
-
-Body:
-{
-  "client_id": "user123",
-  "query": "что такое JSON",
-  "limit": 3,
-  "temperature": 0.75,      // опционально
-  "top_p": 0.92,            // опционально
-  "top_k": 40,              // опционально
-  "max_new_tokens": 512,    // опционально
-  "system_prompt": "..."    // опционально
-}
-
-Response 200: (SSE stream)
-data: {"documents": [...]}
-
-data: {"type": "token", "token": "JSON"}
-
-data: {"type": "token", "token": " is"}
-
-data: {"type": "token", "token": " a"}
-
-...
-
-data: {"type": "done"}
+curl -N -X POST http://localhost:8080/api/v1/chat/public/$BOT_ID \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Что такое машинное обучение?"}'
 ```
+
+#### Получение дефолтных параметров
+
+```bash
+curl http://localhost:8080/api/v1/config/defaults
+# {"temperature": 0.75, "top_p": 0.92, "top_k": 40, ...}
+```
+
+---
+
+## База данных
+
+### Схема PostgreSQL
+
+#### Таблица `users`
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | SERIAL | Первичный ключ |
+| email | VARCHAR(255) | Уникальный email |
+| password_hash | VARCHAR(255) | Хэш пароля (bcrypt) |
+| name | VARCHAR(255) | Имя пользователя |
+| created_at | TIMESTAMPTZ | Дата создания |
+| updated_at | TIMESTAMPTZ | Дата обновления (автотриггер) |
+
+#### Таблица `bots`
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID | Первичный ключ |
+| owner_id | INTEGER | FK на users.id (CASCADE) |
+| name | VARCHAR(255) | Имя бота |
+| description | TEXT | Описание |
+| config | JSONB | Конфигурация (JSON) |
+| temperature | DECIMAL(3,2) | Температура генерации |
+| top_p | DECIMAL(3,2) | Nucleus sampling |
+| top_k | INTEGER | Top-K sampling |
+| max_new_tokens | INTEGER | Макс длина ответа |
+| do_sample | BOOLEAN | Sampling вкл/выкл |
+| system_prompt | TEXT | Системный промпт |
+| chunk_size | INTEGER | Размер чанка |
+| chunk_overlap | INTEGER | Перекрытие чанков |
+| is_active | BOOLEAN | Активен ли бот |
+| created_at | TIMESTAMPTZ | Дата создания |
+| updated_at | TIMESTAMPTZ | Дата обновления (автотриггер) |
+
+#### Таблица `bot_documents`
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | SERIAL | Первичный ключ |
+| bot_id | UUID | FK на bots.id (CASCADE) |
+| filename | VARCHAR(255) | Имя файла |
+| file_type | VARCHAR(50) | Тип файла |
+| file_size | BIGINT | Размер файла (байты) |
+| chunks_count | INTEGER | Количество чанков |
+| uploaded_at | TIMESTAMPTZ | Дата загрузки |
+
+Метаданные документов хранятся в PostgreSQL, а векторные представления (embeddings) — в Qdrant.
 
 ---
 
 ## Разработка
 
-### Локальная разработка без Docker
+### Структура проекта
 
-#### 1. Запустить Qdrant
-
-```bash
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
 ```
-
-#### 2. Document Parser Service
-
-```bash
-cd services/document-parser-service
-go mod download
-go run main.go
-# Будет доступен на :8081
+chat-bot-platfrom/
+├── .env                          # Единая конфигурация (все параметры)
+├── docker-compose.yml            # Docker оркестрация (CPU)
+├── docker-compose.gpu.yml        # GPU override для llama-cpp
+├── models/                       # GGUF модели (git-ignored)
+│   └── .gitkeep
+├── frontend/
+│   ├── Dockerfile
+│   ├── nginx.conf                # Nginx конфигурация (reverse proxy)
+│   ├── vite.config.js
+│   └── src/
+│       ├── api/client.js         # API клиент (fetch + auth)
+│       ├── App.jsx               # Роутинг
+│       └── components/
+│           ├── Auth.jsx          # Обёртка аутентификации
+│           ├── Login.jsx         # Форма входа/регистрации
+│           ├── Dashboard.jsx     # Список ботов
+│           ├── BotForm.jsx       # Создание/редактирование бота
+│           ├── BotChat.jsx       # Чат с ботом
+│           ├── ChatArea.jsx      # Область сообщений
+│           ├── ModelSettings.jsx # Настройки генерации
+│           ├── FileUpload.jsx    # Загрузка документов
+│           └── DocumentSearch.jsx # Поиск по документам
+├── services/
+│   ├── backend/
+│   │   ├── Dockerfile
+│   │   ├── main.go               # Точка входа, роутинг, middleware
+│   │   ├── config/config.go      # Конфигурация из env
+│   │   ├── handlers/handlers.go  # HTTP handlers (RAG, upload, chat)
+│   │   ├── clients/              # HTTP клиенты к микросервисам
+│   │   ├── auth/                 # JWT, middleware, bcrypt
+│   │   ├── database/             # PostgreSQL подключение
+│   │   │   └── schema.sql        # DDL схема (auto-init)
+│   │   └── models/types.go       # Структуры данных
+│   ├── document-parser-service/
+│   │   ├── Dockerfile
+│   │   ├── main.go
+│   │   └── parsers/              # PDF, DOCX, XLSX, CSV, JSON, HTML, MD, TXT
+│   ├── vector-db-service/
+│   │   ├── Dockerfile
+│   │   ├── main.go
+│   │   └── handlers/             # Qdrant gRPC операции
+│   └── python-ai/
+│       ├── Dockerfile            # Встраивает embedding + reranker модели
+│       ├── requirements.txt
+│       └── app/
+│           ├── main.py           # FastAPI + lifespan
+│           ├── config/settings.py # Конфигурация из env
+│           ├── api/routes.py     # Endpoints
+│           ├── models/schemas.py # Pydantic модели
+│           └── services/
+│               ├── model_service_gguf.py  # HTTP клиент для llama.cpp server
+│               └── rag_service.py         # Advanced RAG pipeline
+├── CONFIGURATION.md              # Все переменные окружения
+├── DEPLOYMENT.md                 # Развёртывание и управление
+└── PLATFORM_GUIDE.md             # Это руководство
 ```
-
-#### 3. Vector DB Service
-
-```bash
-cd services/vector-db-service
-export QDRANT_HOST=localhost
-export QDRANT_PORT=6334
-go run main.go
-# Будет доступен на :8082
-```
-
-#### 4. AI Service
-
-```bash
-cd services/python-ai
-pip install -r requirements.txt
-export GGUF_MODEL_PATH=./models/qwen3-4b-q4_k_m.gguf
-export N_THREADS=6
-export N_CTX=8192
-# ... другие переменные из .env
-./start.sh
-# Будет доступен на :8000
-```
-
-#### 5. Backend Gateway
-
-```bash
-cd services/backend
-export DOC_PARSER_URL=http://localhost:8081
-export VECTOR_URL=http://localhost:8082
-export AI_URL=http://localhost:8000
-# ... другие переменные из .env
-go run main.go
-# Будет доступен на :8080
-```
-
-#### 6. Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-# Будет доступен на :5173 (Vite dev server)
-```
-
-### Hot Reload
-
-- **Frontend:** Vite автоматически перезагружает при изменениях
-- **Go сервисы:** Используйте `air` или `reflex` для hot reload
-- **Python:** FastAPI с `--reload` флагом
-
-### Тестирование
-
-```bash
-# Интеграционные тесты
-./test-integration.sh
-
-# Тест параметров модели
-./test-model-params.sh
-
-# Unit тесты Go сервисов
-cd services/backend
-go test ./...
-
-# Python тесты
-cd services/python-ai
-pytest
-```
-
----
-
-## Deployment
-
-### Production с Docker Compose
-
-1. **Настроить `.env` для production:**
-
-```bash
-# Безопасность
-CORS_ALLOW_ORIGINS=https://your-domain.com
-
-# Производительность
-N_THREADS=16              # Больше для мощного CPU
-GEN_MAX_NEW_TOKENS=1024   # Длинные ответы
-CHUNK_SIZE=3000           # Большие чанки
-
-# URLs для production
-DOC_PARSER_URL=http://document-parser:8081
-VECTOR_URL=http://vector-db:8082
-AI_URL=http://ai-service:8000
-```
-
-2. **Запустить:**
-
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
-
-3. **Nginx reverse proxy (опционально):**
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location / {
-        proxy_pass http://localhost:3000;
-    }
-
-    location /api/ {
-        proxy_pass http://localhost:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
-### Kubernetes Deployment
-
-Для Kubernetes деплоя нужно создать:
-- `Deployment` для каждого микросервиса
-- `Service` для внутренней коммуникации
-- `Ingress` для внешнего доступа
-- `PersistentVolumeClaim` для Qdrant
-- `ConfigMap` для конфигурации
-- `Secret` для чувствительных данных
-
-### Масштабирование
-
-**Горизонтальное:**
-- Frontend: stateless, можно масштабировать
-- Backend Gateway: stateless, можно масштабировать
-- Document Parser: stateless, можно масштабировать
-- Vector DB Service: stateless, можно масштабировать
-- AI Service: stateful (модель в памяти), сложнее масштабировать
-- Qdrant: нужен cluster mode для масштабирования
-
-**Вертикальное:**
-- AI Service: увеличить CPU/RAM для быстрой генерации
-- Qdrant: увеличить RAM для больших коллекций
 
 ---
 
 ## Troubleshooting
 
-### Проблема: Контейнеры не запускаются
+### Контейнеры не запускаются
 
 ```bash
-# Проверить логи
-docker-compose logs -f
-
-# Проверить статус
-docker-compose ps
-
-# Перезапустить
-docker-compose down
-docker-compose up -d --build
+docker compose logs -f
+docker compose ps
 ```
 
-### Проблема: Frontend не отображается
+### llama.cpp не загружает модель
 
 ```bash
-# Проверить nginx логи
-docker logs chatbot-frontend
-
-# Проверить сборку
-docker exec chatbot-frontend ls -la /usr/share/nginx/html
-
-# Пересобрать
-docker-compose up -d --build frontend
+ls -lh models/*.gguf
+docker compose logs llama-cpp
+# Убедитесь что GGUF_MODEL_FILE в .env совпадает с именем файла в models/
 ```
 
-### Проблема: Backend не может подключиться к микросервисам
+### AI Service долго стартует
+
+AI Service скачивает embedding и reranker модели при первой сборке Docker-образа (~1.2 GB). После сборки модели встроены в образ и загружаются из локального кэша.
 
 ```bash
-# Проверить, что все сервисы запущены
-docker-compose ps
-
-# Проверить сеть
-docker network inspect chat-bot-platfrom_default
-
-# Проверить .env
-cat .env | grep URL
-
-# Должно быть:
-# DOC_PARSER_URL=http://document-parser:8081
-# VECTOR_URL=http://vector-db:8082
-# AI_URL=http://ai-service:8000
+docker compose logs ai-service
+# "Embedding model loaded" = сервис готов
 ```
 
-### Проблема: Модель не загружается
+### Backend не подключается к сервисам
+
+Backend ожидает healthcheck от всех зависимостей (ai-service, document-parser, vector-db, postgres). Если один из сервисов не healthy, backend не запустится.
 
 ```bash
-# Проверить наличие модели
-docker exec chatbot-ai-service ls -lh /app/models/*.gguf
-
-# Проверить путь в .env
-docker exec chatbot-ai-service printenv GGUF_MODEL_PATH
-
-# Проверить логи загрузки
-docker logs chatbot-ai-service --tail 50
+docker compose ps
+# Все зависимости должны быть healthy
+curl http://localhost:8080/health
 ```
 
-### Проблема: Qdrant недоступен
+### Ошибка "connection refused" при загрузке документов
+
+AI Service имеет `start_period: 120s` в healthcheck, так как загрузка embedding модели занимает время. Backend начнёт работу только когда ai-service станет healthy. Если ошибка всё равно возникает — увеличьте `start_period` и `retries` в docker-compose.yml для ai-service.
+
+### Медленная генерация
+
+1. GPU: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`
+2. Увеличить `N_THREADS` в `.env`
+3. Уменьшить `N_CTX`
+4. Использовать меньшую модель
+
+### GPU не отображается в Task Manager (Windows)
+
+При использовании WSL2 + Docker Desktop нагрузка на GPU отображается через процесс `Vmmem`, а не в разделе GPU диспетчера задач. Это нормальное поведение. Проверить реальное использование GPU:
 
 ```bash
-# Проверить статус
-docker logs chatbot-qdrant
+docker compose logs llama-cpp | grep -i "gpu\|layer\|CUDA"
+# Должно показать загрузку слоев на GPU, например:
+# "offloaded 33/33 layers to GPU"
+```
 
-# Проверить доступность
+### Qdrant недоступен
+
+```bash
 curl http://localhost:6333/health
-
-# Web UI
-open http://localhost:6333/dashboard
-```
-
-### Проблема: Текст без пробелов при генерации
-
-Это исправлено в коде. Проверьте версию:
-- Frontend: убран `.trim()` из `cleanMarkdown()`
-- AI Service: фильтрация пустых токенов в начале
-
-```bash
-# Пересобрать
-docker-compose up -d --build frontend ai-service
-```
-
-### Проблема: Ошибки валидации конфигурации
-
-Все переменные в `.env` обязательны. Проверьте:
-
-```bash
-# Backend
-docker logs chatbot-backend | grep -i error
-
-# AI Service
-docker logs chatbot-ai-service | grep -i error
-
-# Должны быть установлены все переменные из .env
-```
-
-### Проблема: Медленная генерация
-
-1. Увеличьте `N_THREADS` в `.env`
-2. Используйте меньшую модель (qwen2.5-3b вместо qwen3-4b)
-3. Уменьшите `GEN_MAX_NEW_TOKENS`
-4. Используйте greedy decoding: `GEN_TEMPERATURE=0.0`, `GEN_DO_SAMPLE=false`
-
-### Получение помощи
-
-1. Проверьте логи: `docker-compose logs -f`
-2. Проверьте health checks: `curl localhost:8080/health`
-3. Запустите интеграционный тест: `./test-integration.sh`
-4. Создайте issue с логами
-
----
-
-## Полезные команды
-
-```bash
-# Просмотр логов
-docker-compose logs -f                    # Все сервисы
-docker-compose logs -f ai-service         # Конкретный сервис
-
-# Рестарт
-docker-compose restart                    # Все сервисы
-docker-compose restart ai-service         # Конкретный сервис
-
-# Пересборка
-docker-compose up -d --build             # Все сервисы
-docker-compose up -d --build frontend    # Конкретный сервис
-
-# Остановка
-docker-compose down                       # Остановить
-docker-compose down -v                    # Остановить + удалить volumes
-
-# Статус
-docker-compose ps                         # Статус контейнеров
-docker stats                              # Использование ресурсов
-
-# Exec в контейнер
-docker exec -it chatbot-ai-service bash
-docker exec -it chatbot-backend sh
-
-# Очистка
-docker system prune -a                    # Удалить неиспользуемые образы
-docker volume prune                       # Удалить неиспользуемые volumes
+docker compose logs qdrant
 ```
 
 ---
 
-## Лицензия и благодарности
-
-**Лицензия:** MIT
-
-**Используемые технологии:**
-- [Qwen](https://huggingface.co/Qwen) - LLM модель
-- [Qdrant](https://qdrant.tech/) - векторная БД
-- [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) - CPU inference
-- [sentence-transformers](https://www.sbert.net/) - embeddings
-- [FastAPI](https://fastapi.tiangolo.com/) - Python API framework
-- [Fiber](https://gofiber.io/) - Go web framework
-- [React](https://react.dev/) - UI framework
-
----
-
-**Версия документации:** 1.0  
-**Дата обновления:** 3 января 2026  
-**Статус платформы:** Production Ready ✅
+Версия: 2.1

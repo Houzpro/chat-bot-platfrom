@@ -78,18 +78,6 @@ type VectorListResponse struct {
 	Documents []map[string]any `json:"documents,omitempty"`
 }
 
-// UploadRequest represents a document upload request
-type UploadRequest struct {
-	ClientID string `form:"client_id" validate:"required"`
-}
-
-// SearchRequest represents a document search request
-type SearchRequest struct {
-	ClientID string `json:"client_id" validate:"required"`
-	Query    string `json:"query" validate:"required"`
-	Limit    int    `json:"limit" validate:"omitempty,gte=1,lte=100"`
-}
-
 // RAGChatRequest represents a RAG chat request with model parameters
 type RAGChatRequest struct {
 	ClientID     string  `json:"client_id" validate:"required"`
@@ -136,6 +124,6 @@ func (r *RAGChatRequest) SetDefaults(maxResults int, genDefaults GenerationDefau
 		r.DoSample = genDefaults.DoSample
 	}
 	if r.SystemPrompt == "" {
-		r.SystemPrompt = "You are a helpful assistant. /no_think"
+		r.SystemPrompt = genDefaults.UserPrompt
 	}
 }

@@ -33,6 +33,7 @@ func NewDocumentParser() *DocumentParser {
 	p.supportedFormats[".csv"] = p.parseCSV
 	p.supportedFormats[".xlsx"] = p.parseXLSX
 	p.supportedFormats[".xls"] = p.parseXLSX
+	p.supportedFormats[".doc"] = p.parseDOC
 	p.supportedFormats[".html"] = p.parseHTML
 	p.supportedFormats[".htm"] = p.parseHTML
 	p.supportedFormats[".md"] = p.parseMarkdown
@@ -95,69 +96,142 @@ func (p *DocumentParser) parseDOCX(content []byte) (string, error) {
 		return "", fmt.Errorf("не удалось открыть DOCX как ZIP: %w", err)
 	}
 
-	// Ищем word/document.xml
-	var documentXML *zip.File
-	for _, file := range zipReader.File {
-		if file.Name == "word/document.xml" {
-			documentXML = file
-			break
-		}
+	var allText strings.Builder
+
+	// Список XML файлов, из которых извлекаем текст (document.xml + headers/footers)
+	xmlTargets := []string{
+		"word/document.xml",
+		"word/header1.xml", "word/header2.xml", "word/header3.xml",
+		"word/footer1.xml", "word/footer2.xml", "word/footer3.xml",
 	}
 
-	if documentXML == nil {
-		return "", fmt.Errorf("не найден word/document.xml в DOCX файле")
-	}
-
-	// Читаем XML
-	xmlFile, err := documentXML.Open()
-	if err != nil {
-		return "", fmt.Errorf("не удалось открыть document.xml: %w", err)
-	}
-	defer xmlFile.Close()
-
-	xmlData, err := io.ReadAll(xmlFile)
-	if err != nil {
-		return "", fmt.Errorf("не удалось прочитать document.xml: %w", err)
-	}
-
-	// Парсим XML и извлекаем текст
-	return extractTextFromDocumentXML(xmlData)
-}
-
-// extractTextFromDocumentXML извлекает текст из word/document.xml
-func extractTextFromDocumentXML(xmlData []byte) (string, error) {
-	type Text struct {
-		Value string `xml:",chardata"`
-	}
-	type Run struct {
-		Text []Text `xml:"t"`
-	}
-	type Paragraph struct {
-		Runs []Run `xml:"r"`
-	}
-	type Body struct {
-		Paragraphs []Paragraph `xml:"p"`
-	}
-	type Document struct {
-		Body Body `xml:"body"`
-	}
-
-	var doc Document
-	if err := xml.Unmarshal(xmlData, &doc); err != nil {
-		return "", fmt.Errorf("не удалось распарсить XML: %w", err)
-	}
-
-	var text strings.Builder
-	for _, para := range doc.Body.Paragraphs {
-		for _, run := range para.Runs {
-			for _, t := range run.Text {
-				text.WriteString(t.Value)
+	for _, target := range xmlTargets {
+		for _, file := range zipReader.File {
+			if file.Name == target {
+				xmlFile, err := file.Open()
+				if err != nil {
+					continue
+				}
+				xmlData, err := io.ReadAll(xmlFile)
+				xmlFile.Close()
+				if err != nil {
+					continue
+				}
+				text, err := extractTextFromDocumentXML(xmlData)
+				if err != nil {
+					continue
+				}
+				if text != "" {
+					allText.WriteString(text)
+					allText.WriteString("\n\n")
+				}
 			}
 		}
-		text.WriteString("\n")
+	}
+
+	result := strings.TrimSpace(allText.String())
+	if result == "" {
+		return "", fmt.Errorf("не удалось извлечь текст из DOCX файла")
+	}
+	return result, nil
+}
+
+// extractTextFromDocumentXML рекурсивно извлекает весь текст из OOXML,
+// включая параграфы внутри таблиц, текстовых блоков и вложенных структур.
+func extractTextFromDocumentXML(xmlData []byte) (string, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(xmlData))
+	var text strings.Builder
+	var inParagraph bool
+	var paragraphText strings.Builder
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return text.String(), nil // return what we have
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			localName := t.Name.Local
+			switch localName {
+			case "p": // <w:p> — paragraph
+				inParagraph = true
+				paragraphText.Reset()
+			case "tab": // <w:tab> — tab character
+				if inParagraph {
+					paragraphText.WriteString("\t")
+				}
+			case "br": // <w:br> — line break
+				if inParagraph {
+					paragraphText.WriteString("\n")
+				}
+			}
+		case xml.EndElement:
+			localName := t.Name.Local
+			if localName == "p" && inParagraph {
+				line := paragraphText.String()
+				text.WriteString(line)
+				text.WriteString("\n")
+				inParagraph = false
+			}
+		case xml.CharData:
+			if inParagraph {
+				paragraphText.Write(t)
+			}
+		}
 	}
 
 	return strings.TrimSpace(text.String()), nil
+}
+
+// parseDOC handles legacy .doc files.
+// Many modern tools save .doc as DOCX (Office Open XML) internally,
+// so we try DOCX parsing first. If that fails, we extract raw text from the binary.
+func (p *DocumentParser) parseDOC(content []byte) (string, error) {
+	// Try DOCX first — some .doc files are actually DOCX with wrong extension
+	text, err := p.parseDOCX(content)
+	if err == nil && len(strings.TrimSpace(text)) > 0 {
+		return text, nil
+	}
+
+	// Fallback: extract readable text from binary .doc
+	// Legacy .doc is a binary OLE2 format; extract ASCII/UTF-8 text runs
+	var result strings.Builder
+	var current strings.Builder
+	for _, b := range content {
+		if b >= 32 && b < 127 || b == '\n' || b == '\r' || b == '\t' {
+			current.WriteByte(b)
+		} else if b >= 0xC0 && b <= 0xFF {
+			// Possible UTF-8 multibyte start — include it
+			current.WriteByte(b)
+		} else if b >= 0x80 && b <= 0xBF {
+			// UTF-8 continuation byte
+			current.WriteByte(b)
+		} else {
+			// Non-text byte: flush current run if long enough
+			run := strings.TrimSpace(current.String())
+			if len(run) >= 10 {
+				result.WriteString(run)
+				result.WriteString("\n")
+			}
+			current.Reset()
+		}
+	}
+	// Flush remaining
+	run := strings.TrimSpace(current.String())
+	if len(run) >= 10 {
+		result.WriteString(run)
+		result.WriteString("\n")
+	}
+
+	extracted := strings.TrimSpace(result.String())
+	if len(extracted) < 20 {
+		return "", fmt.Errorf("не удалось извлечь текст из .doc файла. Рекомендуется сконвертировать в .docx")
+	}
+	return extracted, nil
 }
 
 func (p *DocumentParser) parseJSON(content []byte) (string, error) {

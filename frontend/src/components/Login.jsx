@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { LogIn, UserPlus } from 'lucide-react'
 import './Auth.css'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 function Login({ onLoginSuccess }) {
   const [isRegister, setIsRegister] = useState(false)

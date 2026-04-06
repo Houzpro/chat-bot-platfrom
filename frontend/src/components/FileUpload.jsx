@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { Upload, File, CheckCircle, AlertCircle, Loader } from 'lucide-react'
 import './FileUpload.css'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 function FileUpload({ clientId }) {
   const [isDragging, setIsDragging] = useState(false)

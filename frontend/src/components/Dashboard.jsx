@@ -4,7 +4,7 @@ import BotChat from './BotChat'
 import BotForm from './BotForm'
 import './Dashboard.css'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = '/api/v1'
 
 function Dashboard({ token, user, onLogout }) {
   const [bots, setBots] = useState([])

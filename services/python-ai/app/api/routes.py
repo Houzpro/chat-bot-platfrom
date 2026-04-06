@@ -49,15 +49,6 @@ def health():
 
 
 
-@router.get("/stream-demo")
-def stream_demo():
-    """Демо-страница для тестирования потоковой генерации"""
-    from pathlib import Path
-    from fastapi.responses import FileResponse
-    html_path = Path(__file__).parent.parent / "static" / "stream-demo.html"
-    return FileResponse(html_path)
-
-
 @router.post("/ask")
 def ask(request: AskRequest):
     """
@@ -144,32 +135,36 @@ def embeddings_endpoint(payload: dict = Body(...)):
 @router.post("/advanced-search")
 def advanced_search_endpoint(payload: dict = Body(...)):
     """
-    🚀 Продвинутый универсальный поиск
-    
-    Использует:
-    - Hybrid Search (Vector + BM25)
-    - Cross-Encoder Reranking
+    Agentic RAG Pipeline v2:
+    - Agentic Router (query classification)
+    - Tiered retrieval (vector -> hybrid -> full_document_read)
+    - Cosine re-ranking (replaces RRF)
+    - Self-correction loop with best_results tracking
+    - Enumeration/global prompts
+    - Language mismatch detection
+    - Pipeline trace for debugging
     """
     bot_id = payload.get("bot_id")
     query = payload.get("query")
     vector_results = payload.get("vector_results", [])
+    all_documents = payload.get("all_documents", [])
     top_k = payload.get("top_k", 30)
-    
+
     if not bot_id or not query:
         raise HTTPException(status_code=400, detail="bot_id and query are required")
-    
+
     try:
-        # Продвинутый поиск
-        results = rag_service.advanced_search(bot_id, query, vector_results, top_k)
-        
-        # Собираем полный контекст (без агрессивной компрессии)
-        max_chars = payload.get("max_context_chars", 100000)
-        context = rag_service.build_context(query, results, max_chars)
-        
+        pipeline_result = rag_service.advanced_search(
+            bot_id, query, vector_results, top_k, all_documents
+        )
+
         return {
-            "results": results,
-            "compressed_context": context,  # Оставляем название для совместимости с backend
-            "num_results": len(results)
+            "results": pipeline_result["results"],
+            "compressed_context": pipeline_result["compressed_context"],
+            "num_results": pipeline_result["num_results"],
+            "trace": pipeline_result["trace"],
+            "prompt_addition": pipeline_result["prompt_addition"],
+            "router_decision": pipeline_result["router_decision"],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Advanced search error: {str(e)}")
@@ -179,21 +174,10 @@ def advanced_search_endpoint(payload: dict = Body(...)):
 def split_document_endpoint(payload: dict = Body(...)):
     """
     Семантическое разбиение документа на чанки.
-    Используется при загрузке документов для лучшего сохранения контекста.
-    
-    Автоматически:
-    - Очищает артефакты PDF
-    - Сохраняет контекст заголовков (имена героев)
-    - Разбивает семантически по предложениям
-    
-    Args:
-        text: Текст документа для разбиения
-        chunk_size: Максимальный размер чанка (по умолчанию 2500)
-        overlap: Размер перекрытия (по умолчанию 500)
     """
     text = payload.get("text")
-    chunk_size = payload.get("chunk_size", 2500)
-    overlap = payload.get("overlap", 500)
+    chunk_size = payload.get("chunk_size", 1200)
+    overlap = payload.get("overlap", 200)
     
     if not text:
         raise HTTPException(status_code=400, detail="text is required")

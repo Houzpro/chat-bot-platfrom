@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/sync/errgroup"
@@ -70,85 +69,6 @@ func (h *Handler) GetDefaults(c *fiber.Ctx) error {
 	})
 }
 
-// UploadDocument handles document upload and processing
-func (h *Handler) UploadDocument(c *fiber.Ctx) error {
-	// Get and validate client ID
-	clientID := utils.SanitizeInput(c.FormValue("client_id"))
-	if err := utils.ValidateClientID(clientID); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	// Get file
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file is required"})
-	}
-
-	// Validate file size (max 100MB)
-	const maxFileSize = 100 * 1024 * 1024
-	if fileHeader.Size > maxFileSize {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large (max 10MB)"})
-	}
-
-	// Validate file extension
-	allowedExtensions := map[string]bool{
-		".pdf": true, ".txt": true, ".docx": true, ".doc": true,
-		".csv": true, ".xlsx": true, ".json": true, ".md": true, ".html": true,
-	}
-	filename := strings.ToLower(fileHeader.Filename)
-	isAllowed := false
-	for ext := range allowedExtensions {
-		if strings.HasSuffix(filename, ext) {
-			isAllowed = true
-			break
-		}
-	}
-	if !isAllowed {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "unsupported file type (allowed: pdf, txt, docx, csv, xlsx, json, md, html)",
-		})
-	}
-
-	// Open file
-	file, err := fileHeader.Open()
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "cannot open file"})
-	}
-	defer file.Close()
-
-	// Parse document
-	textResp, err := h.client.ParseDocument(h.cfg.Services.DocParserURL, fileHeader.Filename, file)
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("parse error: %v", err)})
-	}
-
-	// Не разбиваем на чанки, сохраняем весь текст как один документ
-	if len(strings.TrimSpace(textResp.Text)) == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "no text extracted from document"})
-	}
-
-	embeddings, err := h.client.CreateEmbeddings(h.cfg.Services.AIURL, []string{textResp.Text})
-	if err != nil || len(embeddings) == 0 {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("embedding error: %v", err)})
-	}
-
-	metadata := []map[string]string{{
-		"file_name": textResp.FileName,
-		"file_type": textResp.FileType,
-	}}
-
-	if err := h.client.AddVectorDocuments(h.cfg.Services.VectorURL, clientID, []string{textResp.Text}, embeddings, metadata); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("vector DB error: %v", err)})
-	}
-
-	return c.JSON(fiber.Map{
-		"success":   true,
-		"client_id": clientID,
-		"chunks":    1,
-		"file_name": textResp.FileName,
-	})
-}
-
 // UploadDocumentForBot handles document upload for a specific bot (requires auth and ownership)
 func (h *Handler) UploadDocumentForBot(c *fiber.Ctx) error {
 	botID := normalizeBotID(c.Params("id"))
@@ -164,20 +84,16 @@ func (h *Handler) UploadDocumentForBot(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file is required"})
 	}
 
-	// Validate file size (max 100MB)
-	const maxFileSize = 100 * 1024 * 1024
-	if fileHeader.Size > maxFileSize {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large (max 10MB)"})
+	// Validate file size from config
+	if fileHeader.Size > h.cfg.Upload.MaxFileSize {
+		maxMB := h.cfg.Upload.MaxFileSize / (1024 * 1024)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("file too large (max %dMB)", maxMB)})
 	}
 
-	// Validate file extension
-	allowedExtensions := map[string]bool{
-		".pdf": true, ".txt": true, ".docx": true, ".doc": true,
-		".csv": true, ".xlsx": true, ".json": true, ".md": true, ".html": true,
-	}
+	// Validate file extension from config
 	filename := strings.ToLower(fileHeader.Filename)
 	isAllowed := false
-	for ext := range allowedExtensions {
+	for _, ext := range h.cfg.Upload.AllowedExtensions {
 		if strings.HasSuffix(filename, ext) {
 			isAllowed = true
 			break
@@ -185,7 +101,7 @@ func (h *Handler) UploadDocumentForBot(c *fiber.Ctx) error {
 	}
 	if !isAllowed {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "unsupported file type (allowed: pdf, txt, docx, csv, xlsx, json, md, html)",
+			"error": fmt.Sprintf("unsupported file type (allowed: %s)", strings.Join(h.cfg.Upload.AllowedExtensions, ", ")),
 		})
 	}
 
@@ -250,17 +166,6 @@ func (h *Handler) UploadDocumentForBot(c *fiber.Ctx) error {
 	})
 }
 
-// SearchDocuments handles document search requests
-func (h *Handler) SearchDocuments(c *fiber.Ctx) error {
-	var req models.SearchRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-
-	// Для совместимости: просто возвращаем 501 Not Implemented
-	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "SearchDocuments endpoint is not implemented. Use RAGChat instead."})
-}
-
 // RAGChat handles RAG-based chat requests with streaming
 func (h *Handler) RAGChat(c *fiber.Ctx) error {
 	var req models.RAGChatRequest
@@ -304,7 +209,7 @@ func (h *Handler) RAGChat(c *fiber.Ctx) error {
 	}
 
 	// Create context with timeout for async operations
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), h.cfg.RAG.ContextTimeout)
 	defer cancel()
 
 	// Execute embedding creation
@@ -476,12 +381,22 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 
 	log.Printf("📊 [Advanced RAG] Vector search: %d initial candidates", len(vectorResults))
 
+	// ШАГ 2.5: Получаем ВСЕ документы бота для Window Retrieval (поиск соседних чанков)
+	allDocs, allDocsErr := h.client.ListVectorDocuments(h.cfg.Services.VectorURL, botID, 5000)
+	if allDocsErr != nil {
+		log.Printf("⚠️ [Advanced RAG] Failed to get all docs for window retrieval: %v", allDocsErr)
+		allDocs = vectorResults // fallback: используем только vector results
+	} else {
+		log.Printf("📊 [Advanced RAG] Total docs for window retrieval: %d", len(allDocs))
+	}
+
 	// ШАГ 3: ADVANCED SEARCH - Query Expansion + Hybrid Search + Reranking
 	advancedResult, err := h.client.AdvancedSearch(
 		h.cfg.Services.AIURL,
 		botID,
 		req.Query,
 		vectorResults,
+		allDocs,
 		35, // top_k после reranking (увеличено до 35 для полноты контекста)
 		h.cfg.RAG.MaxContextChars,
 	)
@@ -506,6 +421,22 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 	// Извлекаем результаты
 	results, _ := advancedResult["results"].([]any)
 	compressedContext, _ := advancedResult["compressed_context"].(string)
+	promptAddition, _ := advancedResult["prompt_addition"].(string)
+
+	// Log pipeline trace if available
+	if traceData, ok := advancedResult["trace"].(map[string]any); ok {
+		if traceID, ok := traceData["trace_id"].(string); ok {
+			log.Printf("📊 [Advanced RAG] Trace: %s", traceID)
+		}
+		if bestScore, ok := traceData["best_score"].(float64); ok {
+			log.Printf("📊 [Advanced RAG] Best relevance score: %.2f", bestScore)
+		}
+	}
+	if routerDecision, ok := advancedResult["router_decision"].(map[string]any); ok {
+		queryType, _ := routerDecision["query_type"].(string)
+		suggestedTool, _ := routerDecision["suggested_tool"].(string)
+		log.Printf("🧭 [Advanced RAG] Router: type=%s, tool=%s", queryType, suggestedTool)
+	}
 
 	// Конвертируем results в нужный формат
 	docs := make([]string, 0, len(results))
@@ -525,6 +456,11 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 		contextStr = utils.BuildContext(docs)
 	}
 	contextStr = clampContext(contextStr, h.cfg.RAG.MaxContextChars)
+
+	// Prepend prompt_addition (enumeration/global/multi_hop instructions) to system prompt
+	if promptAddition != "" {
+		req.SystemPrompt = promptAddition + "\n\n" + req.SystemPrompt
+	}
 
 	log.Printf("📝 [Advanced RAG] Final context: %d chars", len(contextStr))
 

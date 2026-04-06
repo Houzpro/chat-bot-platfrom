@@ -1,44 +1,34 @@
 """
-FastAPI приложение для работы с языковой моделью и RAG
+FastAPI приложение для RAG pipeline: эмбеддинги, чанкинг, advanced search.
+LLM генерация делегируется llama.cpp server через OpenAI-совместимый API.
 """
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
 from app.config.settings import settings
 from app.services.rag_service import rag_service
-
-# Используем только GGUF модели (CPU оптимизированные)
 from app.services.model_service_gguf import model_service_gguf as model_service
-print(f"🔧 Используется GGUF модель: {settings.gguf_model_path or 'NOT CONFIGURED'}")
 
 # Инжектим model_service в routes
 from app.api import routes
 routes.model_service = model_service
 
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan события для предзагрузки моделей при старте приложения
-    """
-    # Startup: принудительно загружаем модель
-    print("🚀 Предзагрузка модели...")
+    """Lifespan события для предзагрузки моделей при старте"""
+    print(f"llama.cpp server URL: {settings.llama_server_url}")
     model_service.load_model()
     rag_service.load_embedding_model()
-    print("✅ Модель загружена и готова к работе")
+    print("Embedding model loaded, service ready")
     yield
-    # Shutdown: здесь можно добавить код очистки, если нужно
 
 
-# Создаем приложение FastAPI
 app = FastAPI(
     title="AI Chat Bot Platform - Python Service",
-    description="Микросервис для работы с языковой моделью и RAG",
-    version="1.0.0",
-    lifespan=lifespan
+    description="Микросервис для RAG pipeline: эмбеддинги, чанкинг, advanced search, LLM генерация (через llama.cpp server)",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-# Подключаем роутеры
 app.include_router(routes.router)
-
