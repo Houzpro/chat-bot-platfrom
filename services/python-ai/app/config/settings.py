@@ -41,16 +41,6 @@ class Settings(BaseSettings):
     reranker_model_name: str = os.getenv("RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     use_reranker: bool = os.getenv("USE_RERANKER", "true").lower() in {"true", "1", "yes", "on"}
     
-    # Hybrid Search (Vector + BM25)
-    use_hybrid_search: bool = os.getenv("USE_HYBRID_SEARCH", "true").lower() in {"true", "1", "yes", "on"}
-    
-    # Query Expansion (DEPRECATED - убрано из universal approach)
-    use_query_expansion: bool = os.getenv("USE_QUERY_EXPANSION", "false").lower() in {"true", "1", "yes", "on"}
-    query_expansion_count: int = int(os.getenv("QUERY_EXPANSION_COUNT", "2"))
-    
-    # Contextual Compression (DEPRECATED - используем полный контекст)
-    use_contextual_compression: bool = os.getenv("USE_CONTEXTUAL_COMPRESSION", "false").lower() in {"true", "1", "yes", "on"}
-
     # Relevance thresholds
     relevance_escalation_threshold: float = float(os.getenv("RELEVANCE_ESCALATION_THRESHOLD", "2.0"))
     embedding_similarity_autopass: float = float(os.getenv("EMBEDDING_SIMILARITY_AUTOPASS", "0.65"))

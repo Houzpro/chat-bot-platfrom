@@ -204,7 +204,7 @@ func (p *DocumentParser) parseDOC(content []byte) (string, error) {
 	for _, b := range content {
 		if b >= 32 && b < 127 || b == '\n' || b == '\r' || b == '\t' {
 			current.WriteByte(b)
-		} else if b >= 0xC0 && b <= 0xFF {
+		} else if b >= 0xC0 {
 			// Possible UTF-8 multibyte start — include it
 			current.WriteByte(b)
 		} else if b >= 0x80 && b <= 0xBF {

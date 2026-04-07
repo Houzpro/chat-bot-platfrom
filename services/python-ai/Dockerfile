@@ -20,8 +20,6 @@ RUN python -c "import nltk; nltk.download('punkt_tab', quiet=True)"
 ARG EMBEDDING_MODEL=intfloat/multilingual-e5-base
 ARG RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 
-ENV SENTENCE_TRANSFORMERS_HOME=/app/models/transformers
-
 RUN python -c "\
 from sentence_transformers import SentenceTransformer, CrossEncoder; \
 SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/app/models/embedding'); \

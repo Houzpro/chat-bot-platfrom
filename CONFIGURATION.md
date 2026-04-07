@@ -36,7 +36,9 @@ N_GPU_LAYERS=0       # 0 = CPU only, -1 = все слои на GPU
 LLAMA_PARALLEL=2     # Количество параллельных слотов
 ```
 
-Модель хостится в отдельном Docker контейнере `ghcr.io/ggml-org/llama.cpp:server` и предоставляет OpenAI-совместимый API. Для GPU используйте `docker-compose.gpu.yml`.
+Модель хостится в Docker контейнере `ghcr.io/ggml-org/llama.cpp:server` и предоставляет OpenAI-совместимый API (`/v1/chat/completions`). Для GPU используйте `docker-compose.gpu.yml` (override автоматически устанавливает `--n-gpu-layers -1`).
+
+> `N_GPU_LAYERS` в `.env` работает только в CPU-режиме. В GPU-режиме (`docker-compose.gpu.yml`) всегда используется `-1` (все слои на GPU).
 
 ---
 
@@ -50,7 +52,7 @@ DATABASE_URL=postgresql://chatbot:chatbot_password@postgres:5432/chatbot?sslmode
 JWT_SECRET=your-secret-key-change-in-production-must-be-at-least-32-chars
 ```
 
-**Важно:** `JWT_SECRET` обязателен. При отсутствии сервис не запустится.
+**Важно:** `JWT_SECRET` обязателен. При отсутствии Backend не запустится.
 
 ---
 
@@ -76,7 +78,7 @@ GEN_DO_SAMPLE=true           # Sampling вкл/выкл
 GEN_STOP_SEQUENCES=<|im_end|>,<|endoftext|>
 ```
 
-Эти значения — дефолты. Пользователи могут переопределять их через UI при создании бота.
+Эти значения — серверные дефолты. Пользователи переопределяют их через UI при создании/настройке бота. Frontend загружает дефолты с сервера через `GET /api/v1/config/defaults`.
 
 ---
 
@@ -87,8 +89,8 @@ GEN_SYSTEM_BASE_PROMPT=DO NOT use markdown formatting. Use plain text only. /no_
 GEN_USER_PROMPT=You are a highly knowledgeable and precise assistant...
 ```
 
-- `GEN_SYSTEM_BASE_PROMPT` — базовая инструкция (добавляется к каждому запросу)
-- `GEN_USER_PROMPT` — пользовательская инструкция по умолчанию
+- `GEN_SYSTEM_BASE_PROMPT` — базовая инструкция, добавляется к каждому запросу (не переопределяется пользователем)
+- `GEN_USER_PROMPT` — пользовательская инструкция по умолчанию (может быть переопределена через system prompt бота)
 
 ---
 
@@ -104,6 +106,10 @@ QUERY_EXPANSION_COUNT=2
 USE_CONTEXTUAL_COMPRESSION=false
 ```
 
+Embedding и reranker модели встраиваются в Docker-образ `ai-service` при сборке. При runtime модели загружаются из локального кэша без обращения к интернету:
+- Embedding: `/app/models/embedding` (через `EMBEDDING_CACHE_FOLDER`)
+- Reranker: `/app/models/transformers` (через `SENTENCE_TRANSFORMERS_HOME`)
+
 ---
 
 ### 8. RAG конфигурация
@@ -113,6 +119,7 @@ RAG_MAX_DOC_CHARS=50000       # Макс символов из документ�
 RAG_MAX_CONTEXT_CHARS=30000   # Макс размер контекста для LLM
 RAG_SCORE_THRESHOLD=0.0       # Порог релевантности
 RAG_MAX_RESULTS=60            # Максимум результатов поиска
+RAG_CONTEXT_TIMEOUT_SEC=45    # Таймаут RAG операции (секунды)
 
 # Hybrid Search (Vector + BM25)
 USE_HYBRID_SEARCH=true
@@ -124,8 +131,8 @@ CHUNK_SIZE=1200               # Размер чанка (символы)
 CHUNK_OVERLAP=200             # Перекрытие
 
 # Relevance thresholds
-RELEVANCE_ESCALATION_THRESHOLD=2.0
-EMBEDDING_SIMILARITY_AUTOPASS=0.65
+RELEVANCE_ESCALATION_THRESHOLD=2.0    # Порог для эскалации retrieval tier
+EMBEDDING_SIMILARITY_AUTOPASS=0.65    # Порог для автопрохождения по embedding similarity
 ```
 
 ---
@@ -136,6 +143,8 @@ EMBEDDING_SIMILARITY_AUTOPASS=0.65
 MAX_FILE_SIZE=1048576000      # Макс размер файла (байты, ~1GB)
 BODY_LIMIT=52428800000        # Лимит HTTP body
 ```
+
+Лимит размера файла валидируется на Backend через конфигурацию (не захардкожен).
 
 ---
 
@@ -176,12 +185,13 @@ CHUNK_SIZE=800
 ### Качественный режим (GPU, длинные ответы)
 
 ```bash
-N_GPU_LAYERS=-1
+# Запуск: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 N_CTX=32768
 GEN_MAX_NEW_TOKENS=8192
 GEN_TEMPERATURE=0.75
 RAG_MAX_RESULTS=60
 USE_RERANKER=true
+USE_HYBRID_SEARCH=true
 ```
 
 ### Детерминированный режим (для тестов)
@@ -199,67 +209,84 @@ GEN_TOP_K=1
 
 Каждый микросервис валидирует конфигурацию при старте. Если обязательная переменная не задана — сервис не запустится с ошибкой.
 
+**Backend (Go):**
 ```bash
-# Пример ошибки
 docker compose logs backend
 # "Failed to load configuration: config validation failed: PORT cannot be empty"
+```
+
+**AI Service (Python):**
+```bash
+docker compose logs ai-service
+# "Configuration validation failed:
+#   - EMBEDDING_MODEL_NAME is required
+#   - EMBEDDING_CACHE_FOLDER is required"
 ```
 
 ---
 
 ## Список всех переменных
 
-| Переменная | Тип | Значение по умолчанию |
-|------------|-----|----------------------|
-| `BACKEND_PORT` | int | 8080 |
-| `DOCUMENT_PARSER_PORT` | int | 8081 |
-| `VECTOR_DB_PORT` | int | 8082 |
-| `AI_SERVICE_PORT` | int | 8000 |
-| `FRONTEND_PORT` | int | 3000 |
-| `LLAMA_CPP_PORT` | int | 8090 |
-| `DOC_PARSER_URL` | string | http://document-parser:8081 |
-| `VECTOR_URL` | string | http://vector-db:8082 |
-| `AI_URL` | string | http://ai-service:8000 |
-| `GGUF_MODEL_FILE` | string | qwen3-4b-q4_k_m.gguf |
-| `GGUF_MODEL_PATH` | string | ./models/... |
-| `N_CTX` | int | 32768 |
-| `N_THREADS` | int | 6 |
-| `N_GPU_LAYERS` | int | 0 |
-| `LLAMA_PARALLEL` | int | 2 |
-| `POSTGRES_DB` | string | chatbot |
-| `POSTGRES_USER` | string | chatbot |
-| `POSTGRES_PASSWORD` | string | chatbot_password |
-| `DATABASE_URL` | string | postgresql://... |
-| `JWT_SECRET` | string | (обязательно задать) |
-| `QDRANT_HOST` | string | qdrant |
-| `QDRANT_PORT_REST` | int | 6333 |
-| `QDRANT_PORT_GRPC` | int | 6334 |
-| `QDRANT_COLLECTION_SIZE` | int | 768 |
-| `GEN_MAX_NEW_TOKENS` | int | 8192 |
-| `GEN_TEMPERATURE` | float | 0.75 |
-| `GEN_TOP_P` | float | 0.92 |
-| `GEN_TOP_K` | int | 40 |
-| `GEN_DO_SAMPLE` | bool | true |
-| `GEN_STOP_SEQUENCES` | string | <\|im_end\|>,<\|endoftext\|> |
-| `GEN_SYSTEM_BASE_PROMPT` | string | (см. .env) |
-| `GEN_USER_PROMPT` | string | (см. .env) |
-| `EMBEDDING_MODEL_NAME` | string | intfloat/multilingual-e5-base |
-| `EMBEDDING_CACHE_FOLDER` | string | ./models/embedding |
-| `USE_RERANKER` | bool | true |
-| `RERANKER_MODEL_NAME` | string | cross-encoder/ms-marco-MiniLM-L-6-v2 |
-| `USE_HYBRID_SEARCH` | bool | true |
-| `BM25_WEIGHT` | float | 0.35 |
-| `VECTOR_WEIGHT` | float | 0.65 |
-| `RAG_MAX_DOC_CHARS` | int | 50000 |
-| `RAG_MAX_CONTEXT_CHARS` | int | 30000 |
-| `RAG_SCORE_THRESHOLD` | float | 0.0 |
-| `RAG_MAX_RESULTS` | int | 60 |
-| `RELEVANCE_ESCALATION_THRESHOLD` | float | 2.0 |
-| `EMBEDDING_SIMILARITY_AUTOPASS` | float | 0.65 |
-| `CHUNK_SIZE` | int | 1200 |
-| `CHUNK_OVERLAP` | int | 200 |
-| `MAX_FILE_SIZE` | int | 1048576000 |
-| `BODY_LIMIT` | int | 52428800000 |
-| `HTTP_TIMEOUT_SEC` | int | 300 |
-| `CORS_ALLOW_ORIGINS` | string | * |
-| `LOG_LEVEL` | string | info |
+| Переменная | Тип | Значение по умолчанию | Сервис |
+|------------|-----|----------------------|--------|
+| `BACKEND_PORT` | int | 8080 | backend |
+| `DOCUMENT_PARSER_PORT` | int | 8081 | document-parser |
+| `VECTOR_DB_PORT` | int | 8082 | vector-db |
+| `AI_SERVICE_PORT` | int | 8000 | ai-service |
+| `FRONTEND_PORT` | int | 3000 | frontend |
+| `LLAMA_CPP_PORT` | int | 8090 | llama-cpp |
+| `DOC_PARSER_URL` | string | http://document-parser:8081 | backend |
+| `VECTOR_URL` | string | http://vector-db:8082 | backend |
+| `AI_URL` | string | http://ai-service:8000 | backend |
+| `GGUF_MODEL_FILE` | string | qwen3-4b-q4_k_m.gguf | llama-cpp |
+| `GGUF_MODEL_PATH` | string | ./models/... | ai-service |
+| `N_CTX` | int | 32768 | llama-cpp |
+| `N_THREADS` | int | 6 | llama-cpp |
+| `N_GPU_LAYERS` | int | 0 | llama-cpp |
+| `LLAMA_PARALLEL` | int | 2 | llama-cpp |
+| `POSTGRES_DB` | string | chatbot | postgres |
+| `POSTGRES_USER` | string | chatbot | postgres |
+| `POSTGRES_PASSWORD` | string | chatbot_password | postgres |
+| `DATABASE_URL` | string | postgresql://... | backend |
+| `JWT_SECRET` | string | (обязательно) | backend |
+| `QDRANT_HOST` | string | qdrant | vector-db |
+| `QDRANT_PORT_REST` | int | 6333 | qdrant |
+| `QDRANT_PORT_GRPC` | int | 6334 | vector-db |
+| `QDRANT_COLLECTION_SIZE` | int | 768 | vector-db |
+| `GEN_MAX_NEW_TOKENS` | int | 8192 | ai-service, backend |
+| `GEN_TEMPERATURE` | float | 0.75 | ai-service, backend |
+| `GEN_TOP_P` | float | 0.92 | ai-service, backend |
+| `GEN_TOP_K` | int | 40 | ai-service, backend |
+| `GEN_DO_SAMPLE` | bool | true | ai-service, backend |
+| `GEN_STOP_SEQUENCES` | string | <\|im_end\|>,<\|endoftext\|> | ai-service |
+| `GEN_SYSTEM_BASE_PROMPT` | string | (см. .env) | ai-service, backend |
+| `GEN_USER_PROMPT` | string | (см. .env) | ai-service, backend |
+| `EMBEDDING_MODEL_NAME` | string | intfloat/multilingual-e5-base | ai-service |
+| `EMBEDDING_CACHE_FOLDER` | string | ./models/embedding | ai-service |
+| `USE_RERANKER` | bool | true | ai-service |
+| `RERANKER_MODEL_NAME` | string | cross-encoder/ms-marco-MiniLM-L-6-v2 | ai-service |
+| `USE_HYBRID_SEARCH` | bool | true | ai-service |
+| `USE_QUERY_EXPANSION` | bool | true | ai-service |
+| `QUERY_EXPANSION_COUNT` | int | 2 | ai-service |
+| `USE_CONTEXTUAL_COMPRESSION` | bool | false | ai-service |
+| `BM25_WEIGHT` | float | 0.35 | ai-service |
+| `VECTOR_WEIGHT` | float | 0.65 | ai-service |
+| `RAG_MAX_DOC_CHARS` | int | 50000 | backend |
+| `RAG_MAX_CONTEXT_CHARS` | int | 30000 | backend |
+| `RAG_SCORE_THRESHOLD` | float | 0.0 | backend, vector-db |
+| `RAG_MAX_RESULTS` | int | 60 | backend |
+| `RAG_CONTEXT_TIMEOUT_SEC` | int | 45 | backend |
+| `RELEVANCE_ESCALATION_THRESHOLD` | float | 2.0 | ai-service |
+| `EMBEDDING_SIMILARITY_AUTOPASS` | float | 0.65 | ai-service |
+| `CHUNK_SIZE` | int | 1200 | backend |
+| `CHUNK_OVERLAP` | int | 200 | backend |
+| `MAX_FILE_SIZE` | int | 1048576000 | backend, document-parser |
+| `BODY_LIMIT` | int | 52428800000 | document-parser |
+| `HTTP_TIMEOUT_SEC` | int | 300 | backend |
+| `CORS_ALLOW_ORIGINS` | string | * | backend, document-parser, vector-db |
+| `CORS_ALLOW_METHODS` | string | GET,POST,PUT,DELETE,OPTIONS | backend, document-parser, vector-db |
+| `CORS_ALLOW_HEADERS` | string | Origin,Content-Type,Accept,Authorization | backend, document-parser, vector-db |
+| `LOG_LEVEL` | string | info | все сервисы |
+| `APP_NAME` | string | RAG Chat Platform | metadata |
+| `APP_VERSION` | string | 2.0.0 | metadata |
+| `ENVIRONMENT` | string | production | metadata |

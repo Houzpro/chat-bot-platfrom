@@ -1,32 +1,3 @@
-RAG Chat Platform — обзор и инструкции
-
-Репозиторий содержит микросервисную платформу для Retrieval-Augmented Generation (RAG): парсинг документов, индексация в векторную БД, вычисление эмбеддингов и генерация ответов через локальную LLM-службу.
-
-Ниже — актуальное описание структуры, конфигурации и команд для развёртывания и разработки.
-
-## Содержание
-
-- Обзор сервисов
-- Быстрый запуск (Docker Compose)
-- Локальная разработка
-- Важные файлы и конфигурация
-- Порты и эндпоинты
-- Проверка работоспособности
-
-## Обзор сервисов
-
-- Frontend: React + Vite (папка `frontend`) — статический UI.
-- Backend Gateway: Go + Fiber (папка `services/backend`) — API и RAG pipeline.
-- Document Parser: Go (папка `services/document-parser-service`) — извлечение текста.
-- Vector DB Service: Go (папка `services/vector-db-service`) — интеграция с Qdrant.
-- AI Service: Python + FastAPI (папка `services/python-ai`) — LLM inference и эмбеддинги.
-- Qdrant: векторная база данных (контейнер `qdrant`).
-- PostgreSQL: контейнер `postgres` для метаданных.
-
-## Быстрый запуск (Docker Compose)
-
-1. Отредактируйте файл `.env` в корне репозитория при необходимости.
-2. Запустите все сервисы:
 # RAG Chat Platform
 
 Микросервисная платформа для интеллектуального чата с документами на базе RAG (Retrieval-Augmented Generation). Пользователи создают ботов, загружают документы и получают ответы на вопросы по содержимому документов.
@@ -56,6 +27,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 
 Требуется [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
 
+> Первая сборка занимает дольше — Docker-образ `ai-service` скачивает и встраивает embedding (~1.1 GB) и reranker (~90 MB) модели. После сборки платформа работает полностью автономно без интернета.
+
 ---
 
 ## Архитектура
@@ -75,17 +48,23 @@ Parser      Service      (Python)
       :6333/:6334        :8090
 ```
 
-**7 сервисов:**
+**8 сервисов:**
 
 | Сервис | Технология | Назначение |
 |--------|------------|------------|
 | Frontend | React 18 + Vite + Nginx | UI: чат, управление ботами |
-| Backend Gateway | Go + Fiber | API Gateway, оркестрация |
-| Document Parser | Go | Парсинг PDF, DOCX, TXT, CSV, JSON, HTML, MD |
+| Backend Gateway | Go + Fiber | API Gateway, JWT auth, оркестрация |
+| Document Parser | Go | Парсинг PDF, DOCX, TXT, CSV, JSON, HTML, MD, XLSX |
 | Vector DB Service | Go + Qdrant gRPC | Управление векторными коллекциями |
-| AI Service | Python + FastAPI | Embeddings, RAG pipeline, reranking |
+| AI Service | Python + FastAPI + httpx | Embeddings, RAG pipeline, reranking |
 | llama.cpp server | C++ (Docker) | LLM inference (OpenAI-совместимый API) |
 | Qdrant | Vector Database | Хранение и поиск векторов |
+| PostgreSQL | Реляционная БД | Пользователи, боты, метаданные документов |
+
+### Разделение LLM и AI Service
+
+- **llama-cpp** — LLM inference (генерация текста). Загружает GGUF модель, предоставляет OpenAI API. Может работать на CPU или GPU.
+- **ai-service** — Embeddings, RAG pipeline, reranking. Не загружает LLM, а обращается к llama-cpp по HTTP. Embedding и reranker модели встроены в Docker-образ.
 
 ---
 
@@ -93,11 +72,25 @@ Parser      Service      (Python)
 
 - **Multi-user** - регистрация, JWT-аутентификация, управление ботами
 - **Загрузка документов** - PDF, DOCX, TXT, CSV, JSON, HTML, MD, XLSX
-- **Advanced RAG** - Agentic Router, hybrid search, cosine re-ranking, self-correction
+- **Advanced RAG** - Agentic Router, hybrid search (BM25 + vector), cosine re-ranking, cross-encoder reranking, self-correction loop
 - **Streaming** - потоковая генерация ответов через SSE
-- **Настраиваемые боты** - temperature, top_p, top_k, system prompt через UI
+- **Настраиваемые боты** - temperature, top_p, top_k, max tokens, system prompt через UI
 - **GPU ускорение** - llama.cpp server с CUDA через Docker
 - **Публичный чат** - доступ к боту по URL без авторизации
+- **Полная автономность** - все модели встроены в Docker-образы, интернет не нужен после сборки
+
+---
+
+## Автономная работа
+
+После `docker compose build` платформа не обращается к внешним сервисам:
+
+| Модель | Хранение | Размер |
+|--------|----------|--------|
+| LLM (GGUF) | `./models/` (volume mount) | зависит от модели |
+| Embedding (multilingual-e5-base) | Встроена в образ ai-service | ~1.1 GB |
+| Reranker (ms-marco-MiniLM) | Встроен в образ ai-service | ~90 MB |
+| NLTK (punkt_tab) | Встроен в образ ai-service | ~5 MB |
 
 ---
 
@@ -141,6 +134,12 @@ POST /api/v1/auth/register
 POST /api/v1/auth/login
 {"email": "user@example.com", "password": "pass"}
 
+# Дефолтные параметры генерации
+GET /api/v1/config/defaults
+
+# Информация о боте
+GET /api/v1/bots/:id
+
 # Публичный чат с ботом (streaming SSE)
 POST /api/v1/chat/public/:bot_id
 {"query": "Что такое JSON?"}
@@ -149,13 +148,17 @@ POST /api/v1/chat/public/:bot_id
 ### Защищённые эндпоинты (Authorization: Bearer TOKEN)
 
 ```bash
+# Текущий пользователь
+GET /api/v1/auth/me
+
 # CRUD боты
 POST   /api/v1/bots
 GET    /api/v1/bots
 PUT    /api/v1/bots/:id
 DELETE /api/v1/bots/:id
 
-# Загрузка документов
+# Документы
+GET  /api/v1/bots/:id/documents
 POST /api/v1/bots/:id/documents/upload  (multipart/form-data)
 
 # RAG чат
@@ -171,26 +174,26 @@ POST /api/v1/chat/rag
 chat-bot-platfrom/
 ├── .env                          # Единая конфигурация
 ├── docker-compose.yml            # Основная оркестрация
-├── docker-compose.gpu.yml        # GPU override для llama.cpp
+├── docker-compose.gpu.yml        # GPU override для llama-cpp
 ├── models/                       # GGUF модели (git-ignored)
 ├── frontend/                     # React UI
 ├── services/
 │   ├── backend/                  # Go API Gateway + Auth
 │   ├── document-parser-service/  # Go парсер документов
 │   ├── vector-db-service/        # Go Qdrant клиент
-│   └── python-ai/                # Python RAG + embeddings
-├── CONFIGURATION.md
-├── DEPLOYMENT.md
-└── PLATFORM_GUIDE.md
+│   └── python-ai/                # Python RAG + embeddings (модели встроены в образ)
+├── CONFIGURATION.md              # Все переменные окружения
+├── DEPLOYMENT.md                 # Развёртывание и управление
+└── PLATFORM_GUIDE.md             # Полное руководство по платформе
 ```
 
 ---
 
 ## Документация
 
-- [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md) - полное руководство по платформе
+- [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md) - полное руководство по платформе и архитектуре
 - [CONFIGURATION.md](CONFIGURATION.md) - все переменные окружения
-- [DEPLOYMENT.md](DEPLOYMENT.md) - развёртывание и управление
+- [DEPLOYMENT.md](DEPLOYMENT.md) - развёртывание, GPU, troubleshooting
 
 ---
 
@@ -212,15 +215,15 @@ docker compose down -v               # Остановка + удаление д�
 |-----------|------------|
 | Frontend | React 18, Vite, Nginx |
 | Backend | Go 1.24, Fiber v2 |
-| AI Service | Python 3.10, FastAPI |
+| AI Service | Python 3.10, FastAPI, httpx |
 | LLM Server | llama.cpp (Docker) |
-| LLM | Qwen3-4B (GGUF) |
+| LLM | Qwen3-4B (GGUF, настраивается) |
 | Vector DB | Qdrant |
-| Embeddings | multilingual-e5-base |
-| Reranker | cross-encoder/ms-marco-MiniLM-L-6-v2 |
+| Embeddings | multilingual-e5-base (768D, встроена в образ) |
+| Reranker | cross-encoder/ms-marco-MiniLM-L-6-v2 (встроен в образ) |
 | Database | PostgreSQL 15 |
-| Auth | JWT |
+| Auth | JWT + bcrypt |
 
 ---
 
-Версия: 2.0
+Версия: 2.1
