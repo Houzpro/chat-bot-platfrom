@@ -176,6 +176,8 @@ services:
       GEN_USER_PROMPT: ${GEN_USER_PROMPT}
       HTTP_TIMEOUT_SEC: ${HTTP_TIMEOUT_SEC}
       MAX_FILE_SIZE: ${MAX_FILE_SIZE}
+      BODY_LIMIT: ${BODY_LIMIT}
+      ALLOWED_EXTENSIONS: ${ALLOWED_EXTENSIONS}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
       CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS}
       CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS}
@@ -203,6 +205,18 @@ services:
       dockerfile: Dockerfile
     container_name: chatbot-frontend
     restart: unless-stopped
+    environment:
+      # These variables come straight from .env and are referenced by the same
+      # names inside nginx.conf.template. The nginx:alpine entrypoint runs
+      # envsubst on /etc/nginx/templates/*.template, writing the result to
+      # /etc/nginx/conf.d/default.conf on startup.
+      BODY_LIMIT: ${BODY_LIMIT}
+      BACKEND_PORT: ${BACKEND_PORT}
+      HTTP_TIMEOUT_SEC: ${HTTP_TIMEOUT_SEC}
+      # Whitelist — only these variables are substituted in the template.
+      # Without this, envsubst would also try to replace nginx runtime vars
+      # like $host / $remote_addr / $scheme and blow up the config.
+      NGINX_ENVSUBST_FILTER: "^(BODY_LIMIT|BACKEND_PORT|HTTP_TIMEOUT_SEC)$$"
     ports:
       - "${FRONTEND_PORT}:80"
     depends_on:

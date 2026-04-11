@@ -21,8 +21,9 @@ FROM nginx:alpine
 # Copy built files to nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy nginx config as a template — entrypoint will envsubst into /etc/nginx/conf.d/default.conf
+# using variables listed in NGINX_ENVSUBST_TEMPLATE_VARS (see docker-compose.yml).
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 

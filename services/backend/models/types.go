@@ -87,7 +87,7 @@ type RAGChatRequest struct {
 	Temperature  float64 `json:"temperature" validate:"omitempty,gte=0,lte=2"`
 	TopP         float64 `json:"top_p" validate:"omitempty,gte=0,lte=1"`
 	TopK         int     `json:"top_k" validate:"omitempty,gte=1,lte=200"`
-	MaxNewTokens int     `json:"max_new_tokens" validate:"omitempty,gte=1,lte=4096"`
+	MaxNewTokens int     `json:"max_new_tokens" validate:"omitempty,gte=1,lte=8192"`
 	DoSample     bool    `json:"do_sample"`
 	SystemPrompt string  `json:"system_prompt" validate:"omitempty,max=2000"`
 }

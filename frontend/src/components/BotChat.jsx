@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ArrowLeft, Upload, MessageSquare, Send } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Send } from 'lucide-react'
 import './BotChat.css'
 
 const API_BASE = '/api/v1'
@@ -8,38 +8,6 @@ function BotChat({ bot, token, onBack }) {
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [uploadStatus, setUploadStatus] = useState('')
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    setUploadStatus('Uploading...')
-    const formData = new FormData()
-    formData.append('file', file)
-
-    try {
-      const response = await fetch(`${API_BASE}/bots/${bot.id}/documents/upload`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setUploadStatus(`✓ Uploaded: ${data.file_name}`)
-        setTimeout(() => setUploadStatus(''), 3000)
-      } else {
-        const error = await response.json()
-        setUploadStatus(`✗ Error: ${error.error}`)
-      }
-    } catch (err) {
-      setUploadStatus('✗ Upload failed')
-      console.error('Upload error:', err)
-    }
-  }
 
   const handleSendMessage = async (e) => {
     e.preventDefault()
@@ -165,14 +133,6 @@ function BotChat({ bot, token, onBack }) {
         <div className="bot-info">
           <h1>{bot.name}</h1>
           <p>{bot.description || 'No description'}</p>
-        </div>
-        <div className="upload-section">
-          <label className="upload-btn">
-            <Upload size={20} />
-            Upload Document
-            <input type="file" onChange={handleFileUpload} accept=".pdf,.txt,.docx,.csv,.json,.md,.html" hidden />
-          </label>
-          {uploadStatus && <span className="upload-status">{uploadStatus}</span>}
         </div>
       </header>
 

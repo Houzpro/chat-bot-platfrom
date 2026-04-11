@@ -30,6 +30,17 @@ const apiCall = async (endpoint, options = {}) => {
   return response.json()
 }
 
+// Config API — single source of truth for limits driven by backend .env
+export const configAPI = {
+  getDefaults: async () => {
+    const response = await fetch(`${API_BASE}/config/defaults`)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    return response.json()
+  },
+}
+
 // Auth API
 export const authAPI = {
   register: async (email, password, name) => {

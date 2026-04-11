@@ -91,7 +91,7 @@ func main() {
 	app := fiber.New(fiber.Config{
 		AppName:                      "backend-gateway",
 		Prefork:                      false,            // Disabled in Docker
-		BodyLimit:                    50 * 1024 * 1024, // 50MB
+		BodyLimit:                    cfg.Upload.BodyLimit, // from env (BODY_LIMIT)
 		ReadTimeout:                  cfg.HTTPClient.Timeout,
 		WriteTimeout:                 cfg.HTTPClient.Timeout,
 		IdleTimeout:                  120 * time.Second,

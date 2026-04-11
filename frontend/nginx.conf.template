@@ -4,19 +4,25 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # All tunables below come from the project .env via compose → nginx envsubst.
+    # The list of substituted variables is pinned in docker-compose.yml to avoid
+    # clobbering runtime nginx variables like $host / $remote_addr.
+    client_max_body_size ${BODY_LIMIT};
+
     # Gzip compression
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
     # Proxy API requests to backend
     location /api/ {
-        proxy_pass http://backend:8080/api/;
+        proxy_pass http://backend:${BACKEND_PORT}/api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
+        proxy_read_timeout ${HTTP_TIMEOUT_SEC}s;
+        proxy_send_timeout ${HTTP_TIMEOUT_SEC}s;
+        proxy_request_buffering off;
         proxy_buffering off;
         chunked_transfer_encoding on;
     }

@@ -21,7 +21,10 @@ type Handler struct {
 	client *clients.Client
 }
 
-// clampContext limits context size to avoid exceeding model window
+// clampContext limits context size to avoid exceeding model window.
+// Legacy string-level trim — kept for the fallback path where we only have a
+// pre-built string and no per-document ordering. Prefer buildClampedContext
+// when you still have the docs slice in relevance order.
 func clampContext(contextStr string, maxChars int) string {
 	limit := maxChars
 	if limit <= 0 {
@@ -31,6 +34,57 @@ func clampContext(contextStr string, maxChars int) string {
 		return contextStr[:limit]
 	}
 	return contextStr
+}
+
+// buildClampedContext assembles a context string from docs in relevance order,
+// adding whole chunks one by one until the next chunk would exceed maxChars.
+// This guarantees the top-ranked document survives truncation — unlike the old
+// approach of clamping a pre-joined compressed_context from the tail, which
+// could drop the single most relevant chunk if it physically sat near the end
+// of the joined string. Returns the assembled context and the number of docs
+// that actually fit.
+func buildClampedContext(docs []string, maxChars int) (string, int) {
+	limit := maxChars
+	if limit <= 0 {
+		limit = 16000
+	}
+	if len(docs) == 0 {
+		return "", 0
+	}
+
+	var b strings.Builder
+	kept := 0
+	for i, d := range docs {
+		if d == "" {
+			continue
+		}
+		// "Document N:\n" + text + "\n\n" between docs
+		header := fmt.Sprintf("Document %d:\n", i+1)
+		sep := ""
+		if b.Len() > 0 {
+			sep = "\n\n"
+		}
+		addLen := len(sep) + len(header) + len(d)
+		if b.Len()+addLen > limit {
+			// If nothing has been added yet, at least include a truncated first doc
+			// so we never return an empty context for a non-empty docs slice.
+			if b.Len() == 0 {
+				room := limit - len(header)
+				if room <= 0 {
+					return d[:min(len(d), limit)], 1
+				}
+				b.WriteString(header)
+				b.WriteString(d[:min(len(d), room)])
+				kept = 1
+			}
+			break
+		}
+		b.WriteString(sep)
+		b.WriteString(header)
+		b.WriteString(d)
+		kept++
+	}
+	return b.String(), kept
 }
 
 // normalizeBotID strips a leading "bot_" prefix if callers provide the collection-style ID.
@@ -57,15 +111,22 @@ func (h *Handler) Health(c *fiber.Ctx) error {
 	})
 }
 
-// GetDefaults returns default generation parameters
+// GetDefaults returns default generation parameters along with the upper
+// limit for max_new_tokens derived from GEN_MAX_NEW_TOKENS in env. The
+// frontend uses max_new_tokens_limit as the ceiling for its input so that
+// env remains the single source of truth.
 func (h *Handler) GetDefaults(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
-		"temperature":    h.cfg.Generation.Temperature,
-		"top_p":          h.cfg.Generation.TopP,
-		"top_k":          h.cfg.Generation.TopK,
-		"max_new_tokens": h.cfg.Generation.MaxNewTokens,
-		"do_sample":      h.cfg.Generation.DoSample,
-		"user_prompt":    h.cfg.Generation.UserPrompt,
+		"temperature":          h.cfg.Generation.Temperature,
+		"top_p":                h.cfg.Generation.TopP,
+		"top_k":                h.cfg.Generation.TopK,
+		"max_new_tokens":       h.cfg.Generation.MaxNewTokens,
+		"max_new_tokens_limit": h.cfg.Generation.MaxNewTokens,
+		"do_sample":            h.cfg.Generation.DoSample,
+		"user_prompt":          h.cfg.Generation.UserPrompt,
+		// Upload limits — single source of truth for frontend validation.
+		"max_file_size":       h.cfg.Upload.MaxFileSize,
+		"allowed_extensions":  h.cfg.Upload.AllowedExtensions,
 	})
 }
 
@@ -412,7 +473,7 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 				}
 			}
 		}
-		contextStr := clampContext(utils.BuildContext(docs), h.cfg.RAG.MaxContextChars)
+		contextStr, _ := buildClampedContext(docs, h.cfg.RAG.MaxContextChars)
 
 		// SSE stream с fallback контекстом
 		return h.streamRAGResponse(c, req, docs, contextStr)
@@ -438,7 +499,7 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 		log.Printf("🧭 [Advanced RAG] Router: type=%s, tool=%s", queryType, suggestedTool)
 	}
 
-	// Конвертируем results в нужный формат
+	// Конвертируем results в нужный формат (порядок = порядок релевантности после reranking)
 	docs := make([]string, 0, len(results))
 	for _, r := range results {
 		if resMap, ok := r.(map[string]any); ok {
@@ -447,22 +508,24 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 			}
 		}
 	}
+	log.Printf("🎯 [Advanced RAG] Final: %d docs from advanced search", len(docs))
 
-	log.Printf("🎯 [Advanced RAG] Final: %d docs, context: %d chars", len(docs), len(compressedContext))
-
-	// Используем compressed context или fallback к простому
-	contextStr := compressedContext
-	if contextStr == "" || len(contextStr) < 100 {
-		contextStr = utils.BuildContext(docs)
-	}
-	contextStr = clampContext(contextStr, h.cfg.RAG.MaxContextChars)
+	// Build context from docs in relevance order, adding whole chunks until
+	// we hit MaxContextChars. This guarantees the top-ranked chunk is always
+	// included — fixes a bug where the old path clamped a pre-joined
+	// compressed_context from the tail and could drop the single most relevant
+	// chunk if it happened to sit near the end of the joined string.
+	// compressed_context from python-ai is intentionally ignored here because
+	// it is ordered by document position, not by relevance.
+	_ = compressedContext
+	contextStr, kept := buildClampedContext(docs, h.cfg.RAG.MaxContextChars)
+	log.Printf("📝 [Advanced RAG] Context assembled: %d/%d docs fit, %d chars (limit %d)",
+		kept, len(docs), len(contextStr), h.cfg.RAG.MaxContextChars)
 
 	// Prepend prompt_addition (enumeration/global/multi_hop instructions) to system prompt
 	if promptAddition != "" {
 		req.SystemPrompt = promptAddition + "\n\n" + req.SystemPrompt
 	}
-
-	log.Printf("📝 [Advanced RAG] Final context: %d chars", len(contextStr))
 
 	return h.streamRAGResponse(c, req, docs, contextStr)
 }

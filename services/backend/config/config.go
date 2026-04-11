@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -43,7 +44,8 @@ type HTTPClientConfig struct {
 }
 
 type UploadConfig struct {
-	MaxFileSize    int64
+	MaxFileSize       int64
+	BodyLimit         int
 	AllowedExtensions []string
 }
 
@@ -77,8 +79,9 @@ func Load() (*Config, error) {
 			Timeout: time.Duration(getEnvInt("HTTP_TIMEOUT_SEC", 0)) * time.Second,
 		},
 		Upload: UploadConfig{
-			MaxFileSize:    int64(getEnvInt("MAX_FILE_SIZE", 104857600)), // 100MB default
-			AllowedExtensions: []string{".pdf", ".txt", ".docx", ".doc", ".csv", ".xlsx", ".json", ".md", ".html"},
+			MaxFileSize:       int64(getEnvInt("MAX_FILE_SIZE", 20971520)), // 20MB default
+			BodyLimit:         getEnvInt("BODY_LIMIT", 26214400),           // ~25MB default, must be >= MaxFileSize
+			AllowedExtensions: getEnvStringSlice("ALLOWED_EXTENSIONS", []string{".pdf", ".txt", ".docx", ".doc", ".csv", ".xlsx", ".json", ".md", ".html"}),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
@@ -169,4 +172,26 @@ func getEnvBool(key string, defaultValue bool) bool {
 		return value == "true" || value == "1" || value == "yes"
 	}
 	return defaultValue
+}
+
+// getEnvStringSlice parses a comma-separated env variable into a slice of
+// trimmed, lowercased strings. Used for lists like ALLOWED_EXTENSIONS.
+func getEnvStringSlice(key string, defaultValue []string) []string {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return defaultValue
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		result = append(result, p)
+	}
+	if len(result) == 0 {
+		return defaultValue
+	}
+	return result
 }

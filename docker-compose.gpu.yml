@@ -8,9 +8,11 @@ services:
       --host 0.0.0.0
       --port 8080
       --ctx-size ${N_CTX:-32768}
-      --threads ${N_THREADS:-6}
+      --threads ${N_THREADS:-12}
       --n-gpu-layers -1
       --parallel ${LLAMA_PARALLEL:-2}
+      --cache-type-k q8_0
+      --cache-type-v q8_0
     deploy:
       resources:
         reservations:

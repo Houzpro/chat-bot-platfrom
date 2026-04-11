@@ -31,6 +31,22 @@ const sanitizeBotPayload = (data) => {
   return payload
 }
 
+const DEFAULT_MAX_NEW_TOKENS_LIMIT = 8192
+const DEFAULT_MAX_FILE_SIZE = 20 * 1024 * 1024 // 20 MB fallback
+const DEFAULT_ALLOWED_EXTENSIONS = ['.pdf', '.txt', '.docx', '.doc', '.csv', '.xlsx', '.json', '.md', '.html']
+
+const formatBytes = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`
+}
+
 function BotForm({ token, bot, onSave, onCancel }) {
   const [formData, setFormData] = useState({
     name: bot?.name || '',
@@ -43,27 +59,39 @@ function BotForm({ token, bot, onSave, onCancel }) {
     system_prompt: bot?.system_prompt || '',
     is_active: bot?.is_active ?? true
   })
+  const [maxNewTokensLimit, setMaxNewTokensLimit] = useState(DEFAULT_MAX_NEW_TOKENS_LIMIT)
+  const [maxFileSize, setMaxFileSize] = useState(DEFAULT_MAX_FILE_SIZE)
+  const [allowedExtensions, setAllowedExtensions] = useState(DEFAULT_ALLOWED_EXTENSIONS)
 
-  // Load server defaults for new bots
+  // Load server defaults (token ceiling + upload limits) from /config/defaults
+  // so .env is the single source of truth. Fetched on every mount.
   useEffect(() => {
-    if (!bot) {
-      fetch(`${API_BASE}/config/defaults`)
-        .then(r => r.ok ? r.json() : null)
-        .then(defaults => {
-          if (defaults) {
-            setFormData(prev => ({
-              ...prev,
-              temperature: defaults.temperature ?? prev.temperature,
-              top_p: defaults.top_p ?? prev.top_p,
-              top_k: defaults.top_k ?? prev.top_k,
-              max_new_tokens: defaults.max_new_tokens ?? prev.max_new_tokens,
-              do_sample: defaults.do_sample ?? prev.do_sample,
-              system_prompt: prev.system_prompt || defaults.user_prompt || '',
-            }))
-          }
-        })
-        .catch(() => {})
-    }
+    fetch(`${API_BASE}/config/defaults`)
+      .then(r => r.ok ? r.json() : null)
+      .then(defaults => {
+        if (!defaults) return
+        if (Number.isFinite(defaults.max_new_tokens_limit) && defaults.max_new_tokens_limit > 0) {
+          setMaxNewTokensLimit(defaults.max_new_tokens_limit)
+        }
+        if (Number.isFinite(defaults.max_file_size) && defaults.max_file_size > 0) {
+          setMaxFileSize(defaults.max_file_size)
+        }
+        if (Array.isArray(defaults.allowed_extensions) && defaults.allowed_extensions.length > 0) {
+          setAllowedExtensions(defaults.allowed_extensions)
+        }
+        if (!bot) {
+          setFormData(prev => ({
+            ...prev,
+            temperature: defaults.temperature ?? prev.temperature,
+            top_p: defaults.top_p ?? prev.top_p,
+            top_k: defaults.top_k ?? prev.top_k,
+            max_new_tokens: defaults.max_new_tokens ?? prev.max_new_tokens,
+            do_sample: defaults.do_sample ?? prev.do_sample,
+            system_prompt: prev.system_prompt || defaults.user_prompt || '',
+          }))
+        }
+      })
+      .catch(() => {})
   }, [bot])
   const [files, setFiles] = useState([])
   const [error, setError] = useState('')
@@ -72,7 +100,31 @@ function BotForm({ token, bot, onSave, onCancel }) {
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files)
-    setFiles(prev => [...prev, ...selectedFiles])
+    const accepted = []
+    const rejected = []
+    selectedFiles.forEach((file) => {
+      const name = file.name.toLowerCase()
+      const extOk = allowedExtensions.some(ext => name.endsWith(ext))
+      if (!extOk) {
+        rejected.push(`${file.name}: unsupported type`)
+        return
+      }
+      if (file.size > maxFileSize) {
+        rejected.push(`${file.name}: exceeds ${formatBytes(maxFileSize)}`)
+        return
+      }
+      accepted.push(file)
+    })
+    if (rejected.length > 0) {
+      setError(`Rejected files: ${rejected.join('; ')}`)
+    } else {
+      setError('')
+    }
+    if (accepted.length > 0) {
+      setFiles(prev => [...prev, ...accepted])
+    }
+    // reset input so the same file can be re-selected after fixing
+    e.target.value = ''
   }
 
   const removeFile = (index) => {
@@ -297,13 +349,13 @@ function BotForm({ token, bot, onSave, onCancel }) {
                 name="max_new_tokens"
                 type="number"
                 min="32"
-                max="4096"
+                max={maxNewTokensLimit}
                 step="32"
                 value={formData.max_new_tokens}
                 onChange={handleChange}
                 disabled={isLoading}
               />
-              <small>Maximum response length</small>
+              <small>Maximum response length (32-{maxNewTokensLimit})</small>
             </div>
           </div>
 
@@ -331,7 +383,7 @@ function BotForm({ token, bot, onSave, onCancel }) {
                 type="file"
                 id="file-upload"
                 multiple
-                accept=".pdf,.txt,.docx,.doc,.csv,.xlsx,.json,.md,.html"
+                accept={allowedExtensions.join(',')}
                 onChange={handleFileChange}
                 disabled={isLoading}
                 style={{ display: 'none' }}
@@ -339,7 +391,11 @@ function BotForm({ token, bot, onSave, onCancel }) {
               <label htmlFor="file-upload" className="upload-label">
                 <Upload size={32} />
                 <span>Click to upload or drag and drop</span>
-                <small>PDF, TXT, DOCX, CSV, XLSX, JSON, MD, HTML</small>
+                <small>
+                  {allowedExtensions.map(e => e.replace('.', '').toUpperCase()).join(', ')}
+                  {' · max '}
+                  {formatBytes(maxFileSize)} per file
+                </small>
               </label>
             </div>
 
