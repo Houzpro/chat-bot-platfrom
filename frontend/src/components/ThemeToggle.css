@@ -1,0 +1,25 @@
+.theme-toggle {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+
+.theme-toggle:hover {
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.theme-toggle:active {
+  background: var(--bg-active);
+}

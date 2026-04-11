@@ -1,36 +1,235 @@
+/* ============================================================================
+   Design system — single source of truth for theming.
+   Dark theme is the default (:root). Light theme activates via
+   :root[data-theme="light"]. Every component should read from var(--token),
+   never hardcode colors.
+   ============================================================================ */
+
+:root {
+  /* Surfaces — layered from darkest (app bg) to lightest (elevated cards) */
+  --bg-app:        #0b0d12;
+  --bg-surface:    #12151c;
+  --bg-elevated:   #171b24;
+  --bg-overlay:    #1d2230;
+  --bg-hover:      rgba(255, 255, 255, 0.04);
+  --bg-active:     rgba(255, 255, 255, 0.07);
+
+  /* Text */
+  --text-primary:   #e6e8ee;
+  --text-secondary: #9ba3b4;
+  --text-tertiary:  #6b7280;
+  --text-inverse:   #0b0d12;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Accent (indigo) — single brand color */
+  --accent:         #6366f1;
+  --accent-hover:   #7c7ff5;
+  --accent-active:  #5558e3;
+  --accent-muted:   rgba(99, 102, 241, 0.12);
+  --accent-border:  rgba(99, 102, 241, 0.3);
+  --accent-fg:      #ffffff;
+
+  /* Semantic colors */
+  --success:        #10b981;
+  --success-muted:  rgba(16, 185, 129, 0.12);
+  --success-border: rgba(16, 185, 129, 0.3);
+
+  --warning:        #f59e0b;
+  --warning-muted:  rgba(245, 158, 11, 0.12);
+  --warning-border: rgba(245, 158, 11, 0.3);
+
+  --danger:         #ef4444;
+  --danger-hover:   #f87171;
+  --danger-muted:   rgba(239, 68, 68, 0.12);
+  --danger-border:  rgba(239, 68, 68, 0.3);
+
+  --info:           #3b82f6;
+  --info-muted:     rgba(59, 130, 246, 0.12);
+  --info-border:    rgba(59, 130, 246, 0.3);
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* Spacing (use for gaps/padding; keep multiples of 4) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Shadows — tuned for dark surfaces (subtle, more depth, less blur) */
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg:  0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-xl:  0 20px 60px rgba(0, 0, 0, 0.55);
+  --shadow-focus: 0 0 0 3px var(--accent-muted);
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+               'Liberation Mono', monospace;
+
+  --fs-xs:   12px;
+  --fs-sm:   13px;
+  --fs-base: 14px;
+  --fs-md:   15px;
+  --fs-lg:   17px;
+  --fs-xl:   20px;
+  --fs-2xl:  24px;
+  --fs-3xl:  30px;
+
+  --fw-normal:   400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+
+  --lh-tight:  1.25;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.65;
+
+  /* Motion */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+
+  /* Layout */
+  --header-h: 64px;
+  --container-max: 1280px;
+}
+
+:root[data-theme="light"] {
+  --bg-app:      #f7f8fa;
+  --bg-surface:  #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-overlay:  #ffffff;
+  --bg-hover:    rgba(15, 23, 42, 0.04);
+  --bg-active:   rgba(15, 23, 42, 0.07);
+
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary:  #94a3b8;
+  --text-inverse:   #ffffff;
+
+  --border-subtle:  rgba(15, 23, 42, 0.06);
+  --border-default: rgba(15, 23, 42, 0.1);
+  --border-strong:  rgba(15, 23, 42, 0.18);
+
+  --shadow-sm:  0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md:  0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg:  0 10px 30px rgba(15, 23, 42, 0.1);
+  --shadow-xl:  0 20px 60px rgba(15, 23, 42, 0.15);
+}
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+html, body {
+  height: 100%;
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  color: var(--text-primary);
+  background: var(--bg-app);
   min-height: 100vh;
-  color: #333;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Smooth theme transitions without animating layout-affecting props */
+  transition: background-color var(--dur-base) var(--ease),
+              color var(--dur-base) var(--ease);
 }
 
 #root {
   min-height: 100vh;
 }
 
-/* Scrollbar styles */
+/* Base element resets using tokens */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  color: var(--text-primary);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+a:hover { color: var(--accent-hover); }
+
+/* Keyboard focus — visible, consistent */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--radius-sm);
+}
+
+/* Scrollbars — match surface color */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
-
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+/* Utility: visually hidden but accessible */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

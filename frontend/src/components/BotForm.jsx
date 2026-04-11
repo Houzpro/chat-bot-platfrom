@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { ArrowLeft, Save, Upload, X, FileText } from 'lucide-react'
+import ThemeToggle from './ThemeToggle'
 import './BotForm.css'
 
 const API_BASE = '/api/v1'
@@ -235,10 +236,11 @@ function BotForm({ token, bot, onSave, onCancel }) {
     <div className="bot-form-container">
       <div className="bot-form-header">
         <button onClick={onCancel} className="back-btn">
-          <ArrowLeft size={20} />
-          Back
+          <ArrowLeft size={18} />
+          <span>Back</span>
         </button>
         <h1>{bot ? 'Edit Bot' : 'Create New Bot'}</h1>
+        <ThemeToggle className="bot-form-theme-toggle" />
       </div>
 
       <form onSubmit={handleSubmit} className="bot-form">

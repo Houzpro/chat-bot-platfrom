@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { LogIn, UserPlus } from 'lucide-react'
+import ThemeToggle from './ThemeToggle'
 import './Auth.css'
 
 const API_BASE = '/api/v1'
@@ -57,9 +58,12 @@ function Login({ onLoginSuccess }) {
 
   return (
     <div className="auth-container">
+      <ThemeToggle className="auth-theme-toggle" />
       <div className="auth-card">
         <div className="auth-header">
-          {isRegister ? <UserPlus size={48} /> : <LogIn size={48} />}
+          <div className="auth-header-icon">
+            {isRegister ? <UserPlus size={28} /> : <LogIn size={28} />}
+          </div>
           <h1>{isRegister ? 'Create Account' : 'Welcome Back'}</h1>
           <p>{isRegister ? 'Register to create your AI bots' : 'Login to manage your bots'}</p>
         </div>

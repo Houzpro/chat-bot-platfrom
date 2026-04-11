@@ -83,7 +83,7 @@ func main() {
 
 	// Initialize client and handlers
 	serviceClient := clients.NewClient(httpClient)
-	h := handlers.NewHandler(cfg, serviceClient)
+	h := handlers.NewHandler(cfg, serviceClient, botRepo)
 	authHandler := handlers.NewAuthHandler(userRepo, jwtService)
 	botHandler := handlers.NewBotHandler(botRepo)
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Plus, Bot, LogOut, Trash2, Edit, ExternalLink, Upload } from 'lucide-react'
 import BotChat from './BotChat'
 import BotForm from './BotForm'
+import ThemeToggle from './ThemeToggle'
 import './Dashboard.css'
 
 const API_BASE = '/api/v1'
@@ -21,9 +22,8 @@ const formatBytes = (bytes) => {
   return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`
 }
 
-function Dashboard({ token, user, onLogout }) {
+function Dashboard({ token, user, onLogout, activeBotId = null, navigate }) {
   const [bots, setBots] = useState([])
-  const [selectedBot, setSelectedBot] = useState(null)
   const [showBotForm, setShowBotForm] = useState(false)
   const [editingBot, setEditingBot] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -156,8 +156,8 @@ function Dashboard({ token, user, onLogout }) {
 
       if (response.ok) {
         setBots(bots.filter(b => b.id !== botId))
-        if (selectedBot?.id === botId) {
-          setSelectedBot(null)
+        if (activeBotId === botId) {
+          navigate('/', { replace: true })
         }
       } else {
         alert('Failed to delete bot')
@@ -174,22 +174,41 @@ function Dashboard({ token, user, onLogout }) {
     loadBots()
   }
 
+  // The open bot is derived from the URL (activeBotId from App.jsx) — we no
+  // longer keep a separate selectedBot state. This is the single source of
+  // truth: URL drives view, navigate() drives URL.
+  const selectedBot = activeBotId ? bots.find(b => b.id === activeBotId) || null : null
+
   const handleSelectBot = (bot) => {
-    setSelectedBot(bot)
+    navigate(`/chat/${bot.id}`)
   }
 
+  const handleBackFromChat = () => {
+    navigate('/')
+  }
+
+  // If the URL points at a bot that doesn't exist (stale link, deleted bot,
+  // or belongs to another account), kick the user back to the dashboard so
+  // the address bar stays honest.
+  useEffect(() => {
+    if (!activeBotId || isLoading) return
+    if (bots.length === 0) return
+    const exists = bots.some(b => b.id === activeBotId)
+    if (!exists) navigate('/', { replace: true })
+  }, [activeBotId, isLoading, bots, navigate])
+
   const copyPublicUrl = (botId) => {
-    const url = `${window.location.origin}/chat/${botId}`
+    const url = `${window.location.origin}/public/${botId}`
     navigator.clipboard.writeText(url)
     alert('Public chat URL copied to clipboard!')
   }
 
   if (selectedBot) {
     return (
-      <BotChat 
-        bot={selectedBot} 
+      <BotChat
+        bot={selectedBot}
         token={token}
-        onBack={() => setSelectedBot(null)} 
+        onBack={handleBackFromChat}
       />
     )
   }
@@ -213,19 +232,20 @@ function Dashboard({ token, user, onLogout }) {
       <header className="dashboard-header">
         <div className="header-content">
           <div className="header-left">
-            <Bot size={32} />
+            <Bot size={24} />
             <div>
               <h1>My Bots</h1>
               <p>Welcome, {user.name}</p>
             </div>
           </div>
           <div className="header-right">
+            <ThemeToggle />
             <button onClick={handleCreateBot} className="create-bot-btn">
-              <Plus size={20} />
+              <Plus size={18} />
               Create Bot
             </button>
             <button onClick={onLogout} className="logout-btn">
-              <LogOut size={20} />
+              <LogOut size={18} />
               Logout
             </button>
           </div>
@@ -239,11 +259,11 @@ function Dashboard({ token, user, onLogout }) {
           <div className="error-state">{error}</div>
         ) : bots.length === 0 ? (
           <div className="empty-state">
-            <Bot size={64} />
+            <Bot size={56} strokeWidth={1.5} />
             <h2>No bots yet</h2>
             <p>Create your first bot to get started</p>
             <button onClick={handleCreateBot} className="create-bot-btn">
-              <Plus size={20} />
+              <Plus size={18} />
               Create Bot
             </button>
           </div>

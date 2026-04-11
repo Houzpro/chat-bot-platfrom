@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { ArrowLeft, MessageSquare, Send } from 'lucide-react'
+import ThemeToggle from './ThemeToggle'
 import './BotChat.css'
 
 const API_BASE = '/api/v1'
@@ -127,13 +128,14 @@ function BotChat({ bot, token, onBack }) {
     <div className="bot-chat-container">
       <header className="bot-chat-header">
         <button onClick={onBack} className="back-btn">
-          <ArrowLeft size={20} />
-          Back to Dashboard
+          <ArrowLeft size={18} />
+          <span>Back</span>
         </button>
         <div className="bot-info">
           <h1>{bot.name}</h1>
           <p>{bot.description || 'No description'}</p>
         </div>
+        <ThemeToggle />
       </header>
 
       <div className="chat-messages">

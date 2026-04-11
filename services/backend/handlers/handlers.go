@@ -3,6 +3,7 @@ package handlers
 import (
 	"backend/clients"
 	"backend/config"
+	"backend/database"
 	"backend/models"
 	"backend/utils"
 	"bufio"
@@ -17,8 +18,9 @@ import (
 )
 
 type Handler struct {
-	cfg    *config.Config
-	client *clients.Client
+	cfg     *config.Config
+	client  *clients.Client
+	botRepo *database.BotRepository
 }
 
 // clampContext limits context size to avoid exceeding model window.
@@ -93,10 +95,11 @@ func normalizeBotID(botID string) string {
 	return strings.TrimPrefix(botID, "bot_")
 }
 
-func NewHandler(cfg *config.Config, client *clients.Client) *Handler {
+func NewHandler(cfg *config.Config, client *clients.Client, botRepo *database.BotRepository) *Handler {
 	return &Handler{
-		cfg:    cfg,
-		client: client,
+		cfg:     cfg,
+		client:  client,
+		botRepo: botRepo,
 	}
 }
 
@@ -389,6 +392,26 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 
 	// Подставляем bot_id
 	req.ClientID = botID
+
+	// Load the bot so public chat honors the owner's configured generation
+	// settings (temperature, system prompt, etc.) instead of global defaults.
+	// Public callers cannot override these — we always use what the owner saved.
+	if h.botRepo != nil {
+		bot, err := h.botRepo.GetByID(botID)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "bot not found"})
+		}
+		if !bot.IsActive {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "bot is not active"})
+		}
+		req.Temperature = bot.Temperature
+		req.TopP = bot.TopP
+		req.TopK = bot.TopK
+		req.MaxNewTokens = bot.MaxNewTokens
+		req.DoSample = bot.DoSample
+		req.SystemPrompt = bot.SystemPrompt
+	}
+
 	req.SetDefaults(h.cfg.RAG.MaxResults, h.cfg.Generation)
 
 	// Валидация параметров
