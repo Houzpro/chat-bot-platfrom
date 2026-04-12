@@ -118,6 +118,7 @@ func main() {
 	app.Post("/documents/add", handler.AddDocuments)
 	app.Post("/documents/search", handler.SearchDocuments)
 	app.Delete("/documents/delete/:bot_id", handler.DeleteDocuments)
+	app.Delete("/documents/delete/:bot_id/file", handler.DeleteDocumentsByFileName)
 	app.Get("/documents/stats/:bot_id", handler.GetStats)
 	app.Get("/documents/list/:bot_id", handler.ListDocuments)
 

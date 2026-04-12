@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowLeft, Save, Upload, X, FileText } from 'lucide-react'
+import { ArrowLeft, Save, Upload, X, FileText, Trash2 } from 'lucide-react'
+import { botsAPI } from '../api/client'
 import ThemeToggle from './ThemeToggle'
 import './BotForm.css'
 
@@ -95,9 +96,19 @@ function BotForm({ token, bot, onSave, onCancel }) {
       .catch(() => {})
   }, [bot])
   const [files, setFiles] = useState([])
+  const [existingDocs, setExistingDocs] = useState([])
+  const [deletingDocId, setDeletingDocId] = useState(null)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
+
+  // Load existing documents when editing a bot
+  useEffect(() => {
+    if (!bot) return
+    botsAPI.getDocuments(bot.id)
+      .then(data => setExistingDocs(data.documents || []))
+      .catch(() => {})
+  }, [bot])
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files)
@@ -130,6 +141,20 @@ function BotForm({ token, bot, onSave, onCancel }) {
 
   const removeFile = (index) => {
     setFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleDeleteDocument = async (docId, filename) => {
+    if (!confirm(`Delete "${filename}"? This will also remove all associated chunks from the vector database.`)) return
+    setDeletingDocId(docId)
+    setError('')
+    try {
+      await botsAPI.deleteDocument(bot.id, docId)
+      setExistingDocs(prev => prev.filter(d => d.id !== docId))
+    } catch (err) {
+      setError(`Failed to delete ${filename}: ${err.message}`)
+    } finally {
+      setDeletingDocId(null)
+    }
   }
 
   const uploadDocuments = async (botId) => {
@@ -199,8 +224,8 @@ function BotForm({ token, bot, onSave, onCancel }) {
         const savedBot = await response.json()
         const botId = savedBot.id || bot?.id
         
-        // Upload documents if creating new bot
-        if (!bot && files.length > 0) {
+        // Upload documents for both new and existing bots
+        if (files.length > 0) {
           const uploadSuccess = await uploadDocuments(botId)
           if (!uploadSuccess) {
             setIsLoading(false)
@@ -375,55 +400,82 @@ function BotForm({ token, bot, onSave, onCancel }) {
           </div>
         </div>
 
-        {!bot && (
-          <div className="form-section">
-            <h2>Upload Documents</h2>
-            <p className="section-description">Upload documents that will be indexed for RAG (Retrieval-Augmented Generation)</p>
-            
-            <div className="upload-area">
-              <input
-                type="file"
-                id="file-upload"
-                multiple
-                accept={allowedExtensions.join(',')}
-                onChange={handleFileChange}
-                disabled={isLoading}
-                style={{ display: 'none' }}
-              />
-              <label htmlFor="file-upload" className="upload-label">
-                <Upload size={32} />
-                <span>Click to upload or drag and drop</span>
-                <small>
-                  {allowedExtensions.map(e => e.replace('.', '').toUpperCase()).join(', ')}
-                  {' · max '}
-                  {formatBytes(maxFileSize)} per file
-                </small>
-              </label>
-            </div>
+        <div className="form-section">
+          <h2>Documents</h2>
+          <p className="section-description">
+            {bot ? 'Manage documents indexed for RAG' : 'Upload documents that will be indexed for RAG (Retrieval-Augmented Generation)'}
+          </p>
 
-            {files.length > 0 && (
-              <div className="files-list">
-                {files.map((file, index) => (
-                  <div key={index} className="file-item">
-                    <FileText size={20} />
-                    <span className="file-name">{file.name}</span>
-                    <span className="file-size">
-                      {(file.size / 1024).toFixed(1)} KB
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeFile(index)}
-                      className="remove-file-btn"
-                      disabled={isLoading}
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Existing documents (edit mode) */}
+          {bot && existingDocs.length > 0 && (
+            <div className="files-list">
+              {existingDocs.map(doc => (
+                <div key={doc.id} className="file-item">
+                  <FileText size={20} />
+                  <span className="file-name">{doc.filename}</span>
+                  <span className="file-size">{formatBytes(doc.file_size)}</span>
+                  <span className="file-chunks">{doc.chunks_count} chunks</span>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteDocument(doc.id, doc.filename)}
+                    className="remove-file-btn"
+                    disabled={isLoading || deletingDocId === doc.id}
+                    title="Delete document and its chunks"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {bot && existingDocs.length === 0 && (
+            <p className="no-documents">No documents uploaded yet</p>
+          )}
+
+          {/* Upload area */}
+          <div className="upload-area">
+            <input
+              type="file"
+              id="file-upload"
+              multiple
+              accept={allowedExtensions.join(',')}
+              onChange={handleFileChange}
+              disabled={isLoading}
+              style={{ display: 'none' }}
+            />
+            <label htmlFor="file-upload" className="upload-label">
+              <Upload size={32} />
+              <span>Click to upload or drag and drop</span>
+              <small>
+                {allowedExtensions.map(e => e.replace('.', '').toUpperCase()).join(', ')}
+                {' · max '}
+                {formatBytes(maxFileSize)} per file
+              </small>
+            </label>
           </div>
-        )}
+
+          {files.length > 0 && (
+            <div className="files-list">
+              {files.map((file, index) => (
+                <div key={index} className="file-item">
+                  <FileText size={20} />
+                  <span className="file-name">{file.name}</span>
+                  <span className="file-size">
+                    {formatBytes(file.size)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeFile(index)}
+                    className="remove-file-btn"
+                    disabled={isLoading}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {uploadProgress && <div className="upload-progress">{uploadProgress}</div>}
         {error && <div className="error-message">{error}</div>}

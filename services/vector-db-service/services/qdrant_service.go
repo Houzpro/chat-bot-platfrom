@@ -289,6 +289,96 @@ func (s *QdrantService) SearchDocuments(ctx context.Context, botID string, query
 	return results, nil
 }
 
+// DeleteDocumentsByFileName deletes all points in a bot's collection where file_name matches
+func (s *QdrantService) DeleteDocumentsByFileName(ctx context.Context, botID string, fileName string) (int, error) {
+	collectionName := s.getCollectionName(botID)
+	exists, err := s.collectionsClient.CollectionExists(ctx, &qdrant.CollectionExistsRequest{
+		CollectionName: collectionName,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to check collection: %w", err)
+	}
+	if exists.GetResult() == nil || !exists.GetResult().GetExists() {
+		return 0, nil
+	}
+
+	// Count points before deletion for reporting
+	countBefore := 0
+	var nextPage *qdrant.PointId = nil
+	var pointIDs []*qdrant.PointId
+	for {
+		scrollResult, err := s.pointsClient.Scroll(ctx, &qdrant.ScrollPoints{
+			CollectionName: collectionName,
+			Filter: &qdrant.Filter{
+				Must: []*qdrant.Condition{
+					{
+						ConditionOneOf: &qdrant.Condition_Field{
+							Field: &qdrant.FieldCondition{
+								Key: "file_name",
+								Match: &qdrant.Match{
+									MatchValue: &qdrant.Match_Keyword{
+										Keyword: fileName,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			WithPayload: &qdrant.WithPayloadSelector{
+				SelectorOptions: &qdrant.WithPayloadSelector_Enable{Enable: false},
+			},
+			Offset: nextPage,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("failed to scroll for deletion: %w", err)
+		}
+		for _, point := range scrollResult.Result {
+			pointIDs = append(pointIDs, point.Id)
+			countBefore++
+		}
+		if scrollResult.NextPageOffset == nil {
+			break
+		}
+		nextPage = scrollResult.NextPageOffset
+	}
+
+	if len(pointIDs) == 0 {
+		return 0, nil
+	}
+
+	// Delete by filter
+	_, err = s.pointsClient.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collectionName,
+		Points: &qdrant.PointsSelector{
+			PointsSelectorOneOf: &qdrant.PointsSelector_Filter{
+				Filter: &qdrant.Filter{
+					Must: []*qdrant.Condition{
+						{
+							ConditionOneOf: &qdrant.Condition_Field{
+								Field: &qdrant.FieldCondition{
+									Key: "file_name",
+									Match: &qdrant.Match{
+										MatchValue: &qdrant.Match_Keyword{
+											Keyword: fileName,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete points by file_name: %w", err)
+	}
+
+	log.Printf("[QdrantService] Deleted %d chunks for file %q in collection %s", countBefore, fileName, collectionName)
+	return countBefore, nil
+}
+
 func (s *QdrantService) DeleteDocuments(ctx context.Context, botID string) error {
 	collectionName := s.getCollectionName(botID)
 	_, err := s.collectionsClient.Delete(ctx, &qdrant.DeleteCollection{

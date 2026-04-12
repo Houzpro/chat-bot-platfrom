@@ -39,11 +39,24 @@ func (r *BotRepository) GetByID(id string) (*Bot, error) {
 	return &bot, nil
 }
 
-// GetByOwnerID retrieves all active bots for a specific owner
+// GetByIDForOwner retrieves a bot by ID without is_active filter (for owner operations)
+func (r *BotRepository) GetByIDForOwner(id string, ownerID uint) (*Bot, error) {
+	var bot Bot
+	err := r.db.Conn.Where("id = ? AND owner_id = ?", id, ownerID).First(&bot).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, fmt.Errorf("bot not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bot: %w", err)
+	}
+	return &bot, nil
+}
+
+// GetByOwnerID retrieves all bots for a specific owner (including inactive)
 func (r *BotRepository) GetByOwnerID(ownerID uint) ([]*Bot, error) {
 	var bots []*Bot
-	err := r.db.Conn.Where("owner_id = ? AND is_active = ?", ownerID, true).
-		Order("created_at DESC").
+	err := r.db.Conn.Where("owner_id = ?", ownerID).
+		Order("is_active DESC, created_at DESC").
 		Find(&bots).Error
 
 	if err != nil {
@@ -56,14 +69,16 @@ func (r *BotRepository) GetByOwnerID(ownerID uint) ([]*Bot, error) {
 // Update updates an existing bot
 func (r *BotRepository) Update(bot *Bot) error {
 	result := r.db.Conn.Model(bot).
-		Where("id = ? AND is_active = ?", bot.ID, true).
+		Where("id = ? AND owner_id = ?", bot.ID, bot.OwnerID).
+		Select("*").
+		Omit("id", "owner_id", "created_at").
 		Updates(bot)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to update bot: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("bot not found or inactive")
+		return fmt.Errorf("bot not found")
 	}
 
 	return nil
@@ -71,9 +86,9 @@ func (r *BotRepository) Update(bot *Bot) error {
 
 // Delete soft deletes a bot by setting is_active to false
 func (r *BotRepository) Delete(id string, ownerID uint) error {
-	result := r.db.Conn.Model(&Bot{}).
+	result := r.db.Conn.
 		Where("id = ? AND owner_id = ? AND is_active = ?", id, ownerID, true).
-		Update("is_active", false)
+		Delete(&Bot{})
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete bot: %w", result.Error)
@@ -105,6 +120,39 @@ func (r *BotRepository) GetDocuments(botID string) ([]BotDocument, error) {
 	}
 
 	return docs, nil
+}
+
+// GetDocumentByID retrieves a single document by its ID
+func (r *BotRepository) GetDocumentByID(docID uint) (*BotDocument, error) {
+	var doc BotDocument
+	err := r.db.Conn.Where("id = ?", docID).First(&doc).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, fmt.Errorf("document not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get document: %w", err)
+	}
+	return &doc, nil
+}
+
+// DeleteDocument removes a document metadata entry
+func (r *BotRepository) DeleteDocument(docID uint, botID string) error {
+	result := r.db.Conn.Where("id = ? AND bot_id = ?", docID, botID).Delete(&BotDocument{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete document: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("document not found")
+	}
+	return nil
+}
+
+// DeleteDocumentsByBotID removes all document metadata entries for a bot
+func (r *BotRepository) DeleteDocumentsByBotID(botID string) error {
+	if err := r.db.Conn.Where("bot_id = ?", botID).Delete(&BotDocument{}).Error; err != nil {
+		return fmt.Errorf("failed to delete documents: %w", err)
+	}
+	return nil
 }
 
 // CheckOwnership verifies if a user owns a specific bot

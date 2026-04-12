@@ -101,9 +101,6 @@ EMBEDDING_MODEL_NAME=intfloat/multilingual-e5-base
 EMBEDDING_CACHE_FOLDER=./models/embedding
 USE_RERANKER=true
 RERANKER_MODEL_NAME=cross-encoder/ms-marco-MiniLM-L-6-v2
-USE_QUERY_EXPANSION=true
-QUERY_EXPANSION_COUNT=2
-USE_CONTEXTUAL_COMPRESSION=false
 ```
 
 Embedding и reranker модели встраиваются в Docker-образ `ai-service` при сборке. При runtime модели загружаются из локального кэша без обращения к интернету:
@@ -266,9 +263,6 @@ docker compose logs ai-service
 | `USE_RERANKER` | bool | true | ai-service |
 | `RERANKER_MODEL_NAME` | string | cross-encoder/ms-marco-MiniLM-L-6-v2 | ai-service |
 | `USE_HYBRID_SEARCH` | bool | true | ai-service |
-| `USE_QUERY_EXPANSION` | bool | true | ai-service |
-| `QUERY_EXPANSION_COUNT` | int | 2 | ai-service |
-| `USE_CONTEXTUAL_COMPRESSION` | bool | false | ai-service |
 | `BM25_WEIGHT` | float | 0.35 | ai-service |
 | `VECTOR_WEIGHT` | float | 0.65 | ai-service |
 | `RAG_MAX_DOC_CHARS` | int | 50000 | backend |

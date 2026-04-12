@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"backend/auth"
 	"backend/clients"
 	"backend/config"
 	"backend/database"
@@ -11,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -135,11 +137,22 @@ func (h *Handler) GetDefaults(c *fiber.Ctx) error {
 
 // UploadDocumentForBot handles document upload for a specific bot (requires auth and ownership)
 func (h *Handler) UploadDocumentForBot(c *fiber.Ctx) error {
+	userID, ok := auth.GetUserID(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
 	botID := normalizeBotID(c.Params("id"))
 	log.Printf("[UploadDocumentForBot] Received bot_id from URL: %q", botID)
 
 	if botID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
+	}
+
+	// Check ownership
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err != nil || !isOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "you don't have permission to upload to this bot"})
 	}
 
 	// Get file
@@ -222,11 +235,115 @@ func (h *Handler) UploadDocumentForBot(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("vector DB error: %v", err)})
 	}
 
+	// Save document metadata to database
+	doc := &database.BotDocument{
+		BotID:       botID,
+		Filename:    textResp.FileName,
+		FileType:    textResp.FileType,
+		FileSize:    fileHeader.Size,
+		ChunksCount: len(chunks),
+	}
+	if err := h.botRepo.AddDocument(doc); err != nil {
+		log.Printf("[UploadDocumentForBot] Warning: failed to save document metadata: %v", err)
+	}
+
 	return c.JSON(fiber.Map{
 		"success":   true,
 		"bot_id":    botID,
 		"chunks":    len(chunks),
 		"file_name": textResp.FileName,
+	})
+}
+
+// DeleteBotDocument deletes a specific document from a bot (metadata + vector chunks)
+func (h *Handler) DeleteBotDocument(c *fiber.Ctx) error {
+	userID, ok := auth.GetUserID(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	botID := normalizeBotID(c.Params("id"))
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
+	}
+
+	docIDStr := c.Params("doc_id")
+	docID, err := strconv.ParseUint(docIDStr, 10, 64)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid document id"})
+	}
+
+	// Check ownership
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err != nil || !isOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "you don't have permission to delete this document"})
+	}
+
+	// Get document metadata to find the filename
+	doc, err := h.botRepo.GetDocumentByID(uint(docID))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "document not found"})
+	}
+	if doc.BotID != botID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "document does not belong to this bot"})
+	}
+
+	// Delete chunks from vector DB by filename
+	if err := h.client.DeleteVectorDocumentsByFileName(h.cfg.Services.VectorURL, botID, doc.Filename); err != nil {
+		log.Printf("[DeleteBotDocument] Warning: failed to delete vector chunks: %v", err)
+		// Continue to delete metadata even if vector deletion fails
+	}
+
+	// Delete metadata from database
+	if err := h.botRepo.DeleteDocument(uint(docID), botID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete document"})
+	}
+
+	log.Printf("[DeleteBotDocument] Deleted document %d (%s) from bot %s", docID, doc.Filename, botID)
+	return c.JSON(fiber.Map{
+		"success":   true,
+		"message":   "document deleted",
+		"file_name": doc.Filename,
+	})
+}
+
+// DeleteBot deletes a bot along with all its documents and vector data
+func (h *Handler) DeleteBot(c *fiber.Ctx) error {
+	userID, ok := auth.GetUserID(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	botID := c.Params("id")
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
+	}
+
+	// Verify ownership before any destructive operations
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err != nil || !isOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "you don't have permission to delete this bot"})
+	}
+
+	// Delete vector collection (all chunks)
+	if err := h.client.DeleteVectorCollection(h.cfg.Services.VectorURL, botID); err != nil {
+		log.Printf("[DeleteBot] Warning: failed to delete vector collection: %v", err)
+	}
+
+	// Delete all document metadata
+	if err := h.botRepo.DeleteDocumentsByBotID(botID); err != nil {
+		log.Printf("[DeleteBot] Warning: failed to delete document metadata: %v", err)
+	}
+
+	// Delete the bot
+	if err := h.botRepo.Delete(botID, userID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete bot"})
+	}
+
+	log.Printf("[DeleteBot] Deleted bot %s with all documents and vectors", botID)
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "bot deleted successfully",
 	})
 }
 

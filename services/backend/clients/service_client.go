@@ -284,6 +284,53 @@ func (c *Client) ListVectorDocuments(vectorURL, clientID string, limit int) ([]m
 	return docs, nil
 }
 
+// DeleteVectorCollection deletes the entire vector collection for a bot
+func (c *Client) DeleteVectorCollection(vectorURL, botID string) error {
+	url := fmt.Sprintf("%s/documents/delete/%s", strings.TrimRight(vectorURL, "/"), botID)
+
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("vector service error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// DeleteVectorDocumentsByFileName deletes all chunks for a specific file from the vector database
+func (c *Client) DeleteVectorDocumentsByFileName(vectorURL, botID, fileName string) error {
+	url := fmt.Sprintf("%s/documents/delete/%s/file?file_name=%s",
+		strings.TrimRight(vectorURL, "/"), botID, fileName)
+
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("vector service error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 // StreamGeneration creates a streaming HTTP request to the AI service
 func (c *Client) StreamGeneration(aiURL string, req models.GenerateRequest) (*http.Response, error) {
 	reqBody, err := json.Marshal(req)

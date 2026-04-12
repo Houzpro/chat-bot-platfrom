@@ -135,6 +135,40 @@ func (h *VectorDBHandler) SearchDocuments(c *fiber.Ctx) error {
 	})
 }
 
+func (h *VectorDBHandler) DeleteDocumentsByFileName(c *fiber.Ctx) error {
+	botID := c.Params("bot_id")
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(models.Response{
+			Success: false,
+			Error:   "bot_id is required",
+		})
+	}
+	fileName := c.Query("file_name")
+	if fileName == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(models.Response{
+			Success: false,
+			Error:   "file_name query parameter is required",
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	deleted, err := h.qdrant.DeleteDocumentsByFileName(ctx, botID, fileName)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.Response{
+			Success: false,
+			Error:   err.Error(),
+		})
+	}
+	return c.JSON(models.Response{
+		Success: true,
+		Message: "File chunks deleted",
+		Data: fiber.Map{
+			"deleted_chunks": deleted,
+			"file_name":      fileName,
+		},
+	})
+}
+
 func (h *VectorDBHandler) DeleteDocuments(c *fiber.Ctx) error {
 	botID := c.Params("bot_id")
 	if botID == "" {

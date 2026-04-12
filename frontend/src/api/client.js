@@ -96,6 +96,12 @@ export const botsAPI = {
     return apiCall(`/bots/${id}/documents`)
   },
 
+  deleteDocument: async (botId, docId) => {
+    return apiCall(`/bots/${botId}/documents/${docId}`, {
+      method: 'DELETE',
+    })
+  },
+
   uploadDocument: async (id, file) => {
     const token = getToken()
     const formData = new FormData()

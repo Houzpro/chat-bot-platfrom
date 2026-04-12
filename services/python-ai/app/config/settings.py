@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # Reranker для точного переранжирования
     reranker_model_name: str = os.getenv("RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     use_reranker: bool = os.getenv("USE_RERANKER", "true").lower() in {"true", "1", "yes", "on"}
+
+    # Hybrid Search (Vector + BM25)
+    use_hybrid_search: bool = os.getenv("USE_HYBRID_SEARCH", "true").lower() in {"true", "1", "yes", "on"}
+    bm25_weight: float = float(os.getenv("BM25_WEIGHT", "0.35"))
+    vector_weight: float = float(os.getenv("VECTOR_WEIGHT", "0.65"))
     
     # Relevance thresholds
     relevance_escalation_threshold: float = float(os.getenv("RELEVANCE_ESCALATION_THRESHOLD", "2.0"))

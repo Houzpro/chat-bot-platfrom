@@ -680,7 +680,7 @@ class RAGService:
             if not doc_id:
                 continue
             cosine_s = doc.get('cosine_score', 0)
-            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + cosine_s * 0.7
+            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + cosine_s * settings.vector_weight
             doc_map[doc_id] = doc
 
         for doc in bm25_ranked:
@@ -694,7 +694,7 @@ class RAGService:
                 norm_bm25 = bm25_s / max_bm25
             else:
                 norm_bm25 = 0
-            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + norm_bm25 * 0.3
+            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + norm_bm25 * settings.bm25_weight
             if doc_id not in doc_map:
                 doc_map[doc_id] = doc
 
@@ -813,11 +813,13 @@ class RAGService:
             print(f"\n  === Attempt {attempt + 1}/{max_attempts}: '{current_query[:60]}' ===")
 
             # Choose retrieval tier based on router decision and attempt number
-            if router_decision.suggested_tool == "full_document_read" or attempt >= 2:
+            # When USE_HYBRID_SEARCH is disabled, skip hybrid tier entirely
+            use_hybrid = settings.use_hybrid_search
+            if router_decision.suggested_tool == "full_document_read" or attempt >= 2 or (attempt >= 1 and not use_hybrid):
                 results, relevance = self.full_document_read_tier(
                     current_query, all_documents, top_k=top_k, trace=trace
                 )
-            elif router_decision.suggested_tool == "hybrid_search" or attempt >= 1:
+            elif (router_decision.suggested_tool == "hybrid_search" or attempt >= 1) and use_hybrid:
                 results, relevance = self.hybrid_search_tier(
                     current_query, vector_results, all_documents, top_k=top_k, trace=trace
                 )
@@ -848,7 +850,7 @@ class RAGService:
             # Escalate: add escalation step to trace
             if trace and attempt < max_attempts - 1:
                 current_tool = router_decision.suggested_tool
-                if attempt == 0:
+                if attempt == 0 and use_hybrid:
                     next_tool = "hybrid_search"
                 else:
                     next_tool = "full_document_read"
@@ -865,7 +867,7 @@ class RAGService:
                 current_query = rephrased[attempt]
             # After rephrasing, escalate the tool
             if attempt == 0:
-                router_decision.suggested_tool = "hybrid_search"
+                router_decision.suggested_tool = "hybrid_search" if use_hybrid else "full_document_read"
             elif attempt == 1:
                 router_decision.suggested_tool = "full_document_read"
 

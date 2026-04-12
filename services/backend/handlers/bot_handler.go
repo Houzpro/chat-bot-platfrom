@@ -43,6 +43,7 @@ type UpdateBotRequest struct {
 	TopK         int     `json:"top_k" validate:"omitempty,gte=1,lte=200"`
 	MaxNewTokens int     `json:"max_new_tokens" validate:"omitempty,gte=32,lte=8192"`
 	DoSample     *bool   `json:"do_sample"`
+	IsActive     *bool   `json:"is_active"`
 	SystemPrompt string  `json:"system_prompt" validate:"omitempty,max=2000"`
 	RAGTopK      int     `json:"rag_top_k" validate:"omitempty,gte=1,lte=10"`
 	ChunkSize    int     `json:"chunk_size" validate:"omitempty,gte=100,lte=5000"`
@@ -179,21 +180,8 @@ func (h *BotHandler) UpdateBot(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check ownership
-	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "bot not found",
-		})
-	}
-	if !isOwner {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "you don't have permission to update this bot",
-		})
-	}
-
-	// Get existing bot
-	bot, err := h.botRepo.GetByID(botID)
+	// Get existing bot (checks ownership via owner_id, no is_active filter so owner can reactivate)
+	bot, err := h.botRepo.GetByIDForOwner(botID, userID)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "bot not found",
@@ -229,6 +217,9 @@ func (h *BotHandler) UpdateBot(c *fiber.Ctx) error {
 	}
 	if req.DoSample != nil {
 		bot.DoSample = *req.DoSample
+	}
+	if req.IsActive != nil {
+		bot.IsActive = *req.IsActive
 	}
 	if req.SystemPrompt != "" {
 		bot.SystemPrompt = req.SystemPrompt

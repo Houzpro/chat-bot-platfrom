@@ -333,6 +333,20 @@
   color: var(--danger);
 }
 
+.file-chunks {
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.no-documents {
+  color: var(--text-tertiary);
+  font-size: var(--fs-sm);
+  font-style: italic;
+  padding: var(--space-3) 0;
+}
+
 /* ----- Messages ----- */
 
 .error-message {

@@ -153,11 +153,12 @@ func main() {
 	protected.Post("/bots", botHandler.CreateBot)
 	protected.Get("/bots", botHandler.GetMyBots)
 	protected.Put("/bots/:id", botHandler.UpdateBot)
-	protected.Delete("/bots/:id", botHandler.DeleteBot)
+	protected.Delete("/bots/:id", h.DeleteBot)
 	protected.Get("/bots/:id/documents", botHandler.GetBotDocuments)
 
-	// Document upload (owner only)
+	// Document management (owner only)
 	protected.Post("/bots/:id/documents/upload", h.UploadDocumentForBot)
+	protected.Delete("/bots/:id/documents/:doc_id", h.DeleteBotDocument)
 
 	// RAG chat
 	protected.Post("/chat/rag", h.RAGChat)
