@@ -438,59 +438,7 @@ func (h *Handler) RAGChat(c *fiber.Ctx) error {
 	docs := utils.ExtractRelevantTexts(searchResults, req.Query, h.cfg.RAG.MaxDocChars, snippetWindow)
 	contextStr := clampContext(utils.BuildContext(docs), h.cfg.RAG.MaxContextChars)
 
-	// Setup SSE headers
-	c.Set("Content-Type", "text/event-stream")
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("X-Accel-Buffering", "no") // Disable nginx buffering
-
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		// Send documents info first
-		docsJSON, _ := json.Marshal(map[string]interface{}{
-			"documents": docs,
-		})
-		fmt.Fprintf(w, "data: %s\n\n", docsJSON)
-		w.Flush()
-
-		// Prepare generation request
-		systemPromptWithContext := fmt.Sprintf("%s\n\nContext:\n%s", req.SystemPrompt, contextStr)
-		genReq := models.GenerateRequest{
-			Messages:     []map[string]string{{"role": "user", "content": req.Query}},
-			MaxNewTokens: req.MaxNewTokens,
-			Temperature:  req.Temperature,
-			TopP:         req.TopP,
-			TopK:         req.TopK,
-			DoSample:     req.DoSample,
-			SystemPrompt: systemPromptWithContext,
-		}
-
-		// Call streaming generation
-		resp, err := h.client.StreamGeneration(h.cfg.Services.AIURL, genReq)
-		if err != nil {
-			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
-			fmt.Fprintf(w, "data: %s\n\n", errJSON)
-			w.Flush()
-			return
-		}
-		defer resp.Body.Close()
-
-		// Stream response
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data: ") {
-				fmt.Fprintf(w, "%s\n\n", line)
-				w.Flush()
-			}
-		}
-
-		// Send completion marker
-		fmt.Fprintf(w, "data: [DONE]\n\n")
-		w.Flush()
-	})
-
-	return nil
+	return h.streamRAGResponse(c, req, docs, contextStr)
 }
 
 // PublicRAGChat handles public chat requests using ADVANCED SEARCH (90%+ accuracy)
@@ -681,12 +629,41 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 	c.Set("X-Accel-Buffering", "no")
 
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		// Отправляем документы
+		// Save user message if conversation_id provided
+		if req.ConversationID != "" && h.convRepo != nil {
+			userMsg := &database.Message{
+				ConversationID: req.ConversationID,
+				Role:           "user",
+				Content:        req.Query,
+			}
+			h.convRepo.AddMessage(userMsg)
+			// Auto-set title from first message
+			conv, err := h.convRepo.GetConversationByID(req.ConversationID)
+			if err == nil && conv.Title == "New conversation" {
+				title := req.Query
+				if len(title) > 100 {
+					title = title[:100] + "..."
+				}
+				h.convRepo.UpdateConversationTitle(req.ConversationID, title)
+			}
+		}
+
+		// Send documents
 		docsJSON, _ := json.Marshal(map[string]interface{}{"documents": docs})
 		fmt.Fprintf(w, "data: %s\n\n", docsJSON)
 		w.Flush()
 
-		// Формируем system prompt с контекстом
+		// Send meta info
+		if req.ConversationID != "" {
+			metaJSON, _ := json.Marshal(map[string]interface{}{
+				"type":            "meta",
+				"conversation_id": req.ConversationID,
+			})
+			fmt.Fprintf(w, "data: %s\n\n", metaJSON)
+			w.Flush()
+		}
+
+		// Build system prompt with context
 		systemPromptWithContext := req.SystemPrompt + "\n\nContext:\n" + contextStr
 
 		genReq := models.GenerateRequest{
@@ -708,13 +685,37 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 		}
 		defer resp.Body.Close()
 
+		var fullResponse strings.Builder
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data: ") {
 				fmt.Fprintf(w, "%s\n\n", line)
-				w.Flush()
+				if err := w.Flush(); err != nil {
+					// Client disconnected — close upstream
+					resp.Body.Close()
+					break
+				}
+				// Extract token for persistence
+				data := strings.TrimPrefix(line, "data: ")
+				var tokenMsg struct {
+					Type  string `json:"type"`
+					Token string `json:"token"`
+				}
+				if json.Unmarshal([]byte(data), &tokenMsg) == nil && tokenMsg.Type == "token" {
+					fullResponse.WriteString(tokenMsg.Token)
+				}
 			}
+		}
+
+		// Save assistant message if conversation_id provided
+		if req.ConversationID != "" && h.convRepo != nil && fullResponse.Len() > 0 {
+			assistantMsg := &database.Message{
+				ConversationID: req.ConversationID,
+				Role:           "assistant",
+				Content:        fullResponse.String(),
+			}
+			h.convRepo.AddMessage(assistantMsg)
 		}
 
 		fmt.Fprintf(w, "data: [DONE]\n\n")
