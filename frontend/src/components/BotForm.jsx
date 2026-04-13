@@ -20,7 +20,7 @@ const sanitizeBotPayload = (data) => {
     }
   })
 
-  const intFields = ['top_k', 'max_new_tokens']
+  const intFields = ['top_k', 'max_new_tokens', 'context_window']
   intFields.forEach((field) => {
     const value = Number(payload[field])
     if (Number.isInteger(value)) {
@@ -58,6 +58,7 @@ function BotForm({ token, bot, onSave, onCancel }) {
     top_k: bot?.top_k ?? 40,
     max_new_tokens: bot?.max_new_tokens ?? 512,
     do_sample: bot?.do_sample ?? true,
+    context_window: bot?.context_window ?? 0,
     system_prompt: bot?.system_prompt || '',
     is_active: bot?.is_active ?? true
   })
@@ -89,6 +90,7 @@ function BotForm({ token, bot, onSave, onCancel }) {
             top_k: defaults.top_k ?? prev.top_k,
             max_new_tokens: defaults.max_new_tokens ?? prev.max_new_tokens,
             do_sample: defaults.do_sample ?? prev.do_sample,
+            context_window: defaults.context_window ?? prev.context_window,
             system_prompt: prev.system_prompt || defaults.user_prompt || '',
           }))
         }
@@ -397,6 +399,22 @@ function BotForm({ token, bot, onSave, onCancel }) {
               />
               <span>Enable sampling (recommended for creative responses)</span>
             </label>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="context_window">Context Window ({formData.context_window || 0})</label>
+            <input
+              id="context_window"
+              name="context_window"
+              type="range"
+              min="0"
+              max="50"
+              step="2"
+              value={formData.context_window || 0}
+              onChange={handleChange}
+              disabled={isLoading}
+            />
+            <small>Number of recent messages sent to model for context. 0 = server default</small>
           </div>
         </div>
 

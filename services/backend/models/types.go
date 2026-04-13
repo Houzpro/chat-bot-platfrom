@@ -83,8 +83,10 @@ type RAGChatRequest struct {
 	ClientID       string  `json:"client_id" validate:"required"`
 	Query          string  `json:"query" validate:"required"`
 	Message        string  `json:"message"` // Alternative field name for query
-	ConversationID string  `json:"conversation_id"`
-	Limit          int     `json:"limit" validate:"omitempty,gte=1,lte=100"`
+	ConversationID string              `json:"conversation_id"`
+	ContextWindow  int                 `json:"context_window"`
+	History        []map[string]string `json:"history"`
+	Limit          int                 `json:"limit" validate:"omitempty,gte=1,lte=100"`
 	Temperature  float64 `json:"temperature" validate:"omitempty,gte=0,lte=2"`
 	TopP         float64 `json:"top_p" validate:"omitempty,gte=0,lte=1"`
 	TopK         int     `json:"top_k" validate:"omitempty,gte=1,lte=200"`

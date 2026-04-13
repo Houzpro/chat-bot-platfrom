@@ -68,13 +68,23 @@ function PublicChat({ botId }) {
     abortControllerRef.current = new AbortController()
 
     try {
-      // Public endpoint ignores generation params from the client — the backend
-      // pulls them from the bot's saved config. We only send the message.
+      // Send recent history so the model has conversational context.
+      // Trim on the client to avoid bloated requests on long sessions.
+      const contextWindow = bot.context_window || 10
+      const completedMessages = messages
+        .filter(m => !m.streaming)
+        .map(m => ({ role: m.role, content: m.content }))
+      const history = completedMessages.slice(-contextWindow)
       const response = await fetch(`${API_BASE}/chat/public/${bot.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortControllerRef.current.signal,
-        body: JSON.stringify({ message: query, limit: 60 })
+        body: JSON.stringify({
+          message: query,
+          limit: 60,
+          history,
+          context_window: contextWindow,
+        })
       })
 
       if (!response.ok) throw new Error('Chat failed')

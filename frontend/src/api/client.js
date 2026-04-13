@@ -146,3 +146,27 @@ export const publicChatAPI = {
     return response // Return response for streaming
   },
 }
+
+// Conversations API
+export const conversationsAPI = {
+  create: async (botId, title) => {
+    return apiCall('/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ bot_id: botId, title: title || '' }),
+    })
+  },
+
+  getByBot: async (botId) => {
+    return apiCall(`/bots/${botId}/conversations`)
+  },
+
+  get: async (convId) => {
+    return apiCall(`/conversations/${convId}`)
+  },
+
+  delete: async (convId) => {
+    return apiCall(`/conversations/${convId}`, {
+      method: 'DELETE',
+    })
+  },
+}

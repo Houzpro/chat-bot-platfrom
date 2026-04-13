@@ -1,5 +1,5 @@
 import React from 'react'
-import { X, Sliders, Thermometer, Target, Hash, FileText } from 'lucide-react'
+import { X, Sliders, Thermometer, Target, Hash, FileText, MessageSquare } from 'lucide-react'
 import './ModelSettings.css'
 
 function ModelSettings({ settings, onChange, onClose }) {
@@ -108,6 +108,25 @@ function ModelSettings({ settings, onChange, onClose }) {
             />
             <p className="setting-hint">
               Максимальная длина генерируемого ответа в токенах
+            </p>
+          </div>
+
+          <div className="setting-group">
+            <label>
+              <MessageSquare size={18} />
+              Контекст диалога (сообщений)
+              <span className="setting-value">{settings.context_window || 0}</span>
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="50"
+              step="2"
+              value={settings.context_window || 0}
+              onChange={(e) => handleChange('context_window', parseInt(e.target.value))}
+            />
+            <p className="setting-hint">
+              Количество последних сообщений, отправляемых модели для контекста. 0 = глобальная настройка сервера
             </p>
           </div>
 

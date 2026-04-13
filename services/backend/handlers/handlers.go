@@ -131,6 +131,7 @@ func (h *Handler) GetDefaults(c *fiber.Ctx) error {
 		"max_new_tokens_limit": h.cfg.Generation.MaxNewTokens,
 		"do_sample":            h.cfg.Generation.DoSample,
 		"user_prompt":          h.cfg.Generation.UserPrompt,
+		"context_window":      h.cfg.RAG.ContextWindowSize,
 		// Upload limits — single source of truth for frontend validation.
 		"max_file_size":       h.cfg.Upload.MaxFileSize,
 		"allowed_extensions":  h.cfg.Upload.AllowedExtensions,
@@ -332,6 +333,13 @@ func (h *Handler) DeleteBot(c *fiber.Ctx) error {
 		log.Printf("[DeleteBot] Warning: failed to delete vector collection: %v", err)
 	}
 
+	// Delete all conversations and messages
+	if h.convRepo != nil {
+		if err := h.convRepo.DeleteConversationsByBotID(botID); err != nil {
+			log.Printf("[DeleteBot] Warning: failed to delete conversations: %v", err)
+		}
+	}
+
 	// Delete all document metadata
 	if err := h.botRepo.DeleteDocumentsByBotID(botID); err != nil {
 		log.Printf("[DeleteBot] Warning: failed to delete document metadata: %v", err)
@@ -386,6 +394,9 @@ func (h *Handler) RAGChat(c *fiber.Ctx) error {
 	}
 	if req.MaxNewTokens > 8192 {
 		req.MaxNewTokens = 8192
+	}
+	if req.ContextWindow > 50 {
+		req.ContextWindow = 50
 	}
 	if len(req.SystemPrompt) > 2000 {
 		req.SystemPrompt = req.SystemPrompt[:2000]
@@ -477,6 +488,9 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 		req.MaxNewTokens = bot.MaxNewTokens
 		req.DoSample = bot.DoSample
 		req.SystemPrompt = bot.SystemPrompt
+		if bot.ContextWindow > 0 {
+			req.ContextWindow = bot.ContextWindow
+		}
 	}
 
 	req.SetDefaults(h.cfg.RAG.MaxResults, h.cfg.Generation)
@@ -496,6 +510,9 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 	}
 	if req.MaxNewTokens > 8192 {
 		req.MaxNewTokens = 8192
+	}
+	if req.ContextWindow > 50 {
+		req.ContextWindow = 50
 	}
 	if len(req.SystemPrompt) > 2000 {
 		req.SystemPrompt = req.SystemPrompt[:2000]
@@ -666,8 +683,46 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 		// Build system prompt with context
 		systemPromptWithContext := req.SystemPrompt + "\n\nContext:\n" + contextStr
 
+		// Build messages array with conversation history
+		var chatMessages []map[string]string
+
+		contextWindow := h.cfg.RAG.ContextWindowSize
+		if req.ContextWindow > 0 {
+			contextWindow = req.ContextWindow
+		}
+
+		if req.ConversationID != "" && h.convRepo != nil {
+			// Load history from DB for authenticated chats
+			recentMsgs, err := h.convRepo.GetRecentMessages(req.ConversationID, contextWindow)
+			if err == nil && len(recentMsgs) > 0 {
+				for _, m := range recentMsgs {
+					// Skip the user message we just saved (it's the current query)
+					if m.Role == "user" && m.Content == req.Query {
+						continue
+					}
+					chatMessages = append(chatMessages, map[string]string{
+						"role":    m.Role,
+						"content": m.Content,
+					})
+				}
+			}
+		} else if len(req.History) > 0 {
+			// Use client-provided history for stateless (public) chats
+			limit := contextWindow
+			if len(req.History) > limit {
+				req.History = req.History[len(req.History)-limit:]
+			}
+			chatMessages = append(chatMessages, req.History...)
+		}
+
+		// Always add the current user query as the last message
+		chatMessages = append(chatMessages, map[string]string{
+			"role":    "user",
+			"content": req.Query,
+		})
+
 		genReq := models.GenerateRequest{
-			Messages:     []map[string]string{{"role": "user", "content": req.Query}},
+			Messages:     chatMessages,
 			MaxNewTokens: req.MaxNewTokens,
 			Temperature:  req.Temperature,
 			TopP:         req.TopP,

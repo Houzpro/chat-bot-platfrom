@@ -249,6 +249,134 @@
   font-size: 0.85em;
 }
 
+/* ----- Conversation sidebar ----- */
+
+.chat-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.chat-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-header h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+
+.new-conv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+
+.new-conv-btn:hover {
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.sidebar-item:hover {
+  background: var(--bg-elevated);
+}
+
+.sidebar-item.active {
+  background: var(--bg-overlay);
+}
+
+.conv-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+
+.conv-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  padding: var(--space-1);
+  color: var(--text-tertiary);
+  transition: opacity var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+
+.sidebar-item:hover .conv-delete {
+  opacity: 1;
+}
+
+.conv-delete:hover {
+  color: var(--danger, #ef4444);
+}
+
+.sidebar-empty {
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--fs-sm);
+}
+
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.stop-btn {
+  background: var(--danger, #ef4444);
+}
+
+.stop-btn:hover:not(:disabled) {
+  background: var(--danger-hover, #dc2626);
+}
+
 /* ----- Responsive ----- */
 
 @media (max-width: 768px) {
@@ -259,6 +387,10 @@
 
   .back-btn span {
     display: none;
+  }
+
+  .chat-sidebar {
+    width: 200px;
   }
 
   .chat-messages {

@@ -37,8 +37,9 @@ type Bot struct {
 	SystemPrompt string  `gorm:"type:text" json:"system_prompt"`
 
 	// RAG settings
-	ChunkSize    int `gorm:"default:800" json:"chunk_size"`
-	ChunkOverlap int `gorm:"default:200" json:"chunk_overlap"`
+	ChunkSize     int `gorm:"default:800" json:"chunk_size"`
+	ChunkOverlap  int `gorm:"default:200" json:"chunk_overlap"`
+	ContextWindow int `gorm:"default:0" json:"context_window"`
 
 	// Status
 	IsActive  bool      `gorm:"default:true;index" json:"is_active"`

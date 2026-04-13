@@ -30,13 +30,14 @@ type ServicesConfig struct {
 }
 
 type RAGConfig struct {
-	ChunkSize       int
-	ChunkOverlap    int
-	MaxDocChars     int
-	MaxContextChars int
-	MaxResults      int
-	ScoreThreshold  float64
-	ContextTimeout  time.Duration
+	ChunkSize         int
+	ChunkOverlap      int
+	MaxDocChars       int
+	MaxContextChars   int
+	MaxResults        int
+	ScoreThreshold    float64
+	ContextTimeout    time.Duration
+	ContextWindowSize int
 }
 
 type HTTPClientConfig struct {
@@ -70,10 +71,11 @@ func Load() (*Config, error) {
 			ChunkSize:       getEnvInt("CHUNK_SIZE", 0),
 			ChunkOverlap:    getEnvInt("CHUNK_OVERLAP", 0),
 			MaxDocChars:     getEnvInt("RAG_MAX_DOC_CHARS", 0),
-			MaxContextChars: getEnvInt("RAG_MAX_CONTEXT_CHARS", 16000),
-			MaxResults:      getEnvInt("RAG_MAX_RESULTS", 100),
-			ScoreThreshold:  getEnvFloat("RAG_SCORE_THRESHOLD", 0.5),
-			ContextTimeout:  time.Duration(getEnvInt("RAG_CONTEXT_TIMEOUT_SEC", 45)) * time.Second,
+			MaxContextChars: getEnvInt("RAG_MAX_CONTEXT_CHARS", 30000),
+			MaxResults:      getEnvInt("RAG_MAX_RESULTS", 60),
+			ScoreThreshold:  getEnvFloat("RAG_SCORE_THRESHOLD", 0.0),
+			ContextTimeout:    time.Duration(getEnvInt("RAG_CONTEXT_TIMEOUT_SEC", 45)) * time.Second,
+			ContextWindowSize: getEnvInt("CHAT_CONTEXT_WINDOW", 5),
 		},
 		HTTPClient: HTTPClientConfig{
 			Timeout: time.Duration(getEnvInt("HTTP_TIMEOUT_SEC", 0)) * time.Second,

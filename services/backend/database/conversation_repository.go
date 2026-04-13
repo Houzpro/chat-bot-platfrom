@@ -56,12 +56,32 @@ func (r *ConversationRepository) GetConversationsByBotIDAndUserID(botID string, 
 }
 
 func (r *ConversationRepository) DeleteConversation(id string) error {
+	// Delete messages first to avoid foreign key violation
+	// (GORM AutoMigrate does not create ON DELETE CASCADE)
+	if err := r.db.Conn.Where("conversation_id = ?", id).Delete(&Message{}).Error; err != nil {
+		return fmt.Errorf("failed to delete messages: %w", err)
+	}
+
 	result := r.db.Conn.Where("id = ?", id).Delete(&Conversation{})
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete conversation: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("conversation not found")
+	}
+	return nil
+}
+
+func (r *ConversationRepository) DeleteConversationsByBotID(botID string) error {
+	// Delete all messages for conversations belonging to this bot
+	if err := r.db.Conn.Where("conversation_id IN (?)",
+		r.db.Conn.Model(&Conversation{}).Select("id").Where("bot_id = ?", botID),
+	).Delete(&Message{}).Error; err != nil {
+		return fmt.Errorf("failed to delete messages for bot: %w", err)
+	}
+	// Delete all conversations
+	if err := r.db.Conn.Where("bot_id = ?", botID).Delete(&Conversation{}).Error; err != nil {
+		return fmt.Errorf("failed to delete conversations for bot: %w", err)
 	}
 	return nil
 }
