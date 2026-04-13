@@ -85,5 +85,7 @@ func (db *DB) AutoMigrate() error {
 		&User{},
 		&Bot{},
 		&BotDocument{},
+		&Conversation{},
+		&Message{},
 	)
 }

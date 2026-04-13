@@ -72,6 +72,41 @@ type BotDocument struct {
 	Bot Bot `gorm:"foreignKey:BotID" json:"bot,omitempty"`
 }
 
+// Conversation represents a chat conversation (dialog) for a bot
+type Conversation struct {
+	ID        string    `gorm:"type:uuid;primaryKey" json:"id"`
+	BotID     string    `gorm:"type:uuid;not null;index" json:"bot_id"`
+	UserID    *uint     `gorm:"index" json:"user_id,omitempty"`
+	Title     string    `gorm:"size:255" json:"title"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	// Relationships
+	Bot      Bot       `gorm:"foreignKey:BotID" json:"-"`
+	Messages []Message `gorm:"foreignKey:ConversationID" json:"messages,omitempty"`
+}
+
+// BeforeCreate hook to generate UUID for Conversation
+func (conv *Conversation) BeforeCreate(tx *gorm.DB) error {
+	if conv.ID == "" {
+		conv.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// Message represents a single message in a conversation
+type Message struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	ConversationID string    `gorm:"type:uuid;not null;index" json:"conversation_id"`
+	Role           string    `gorm:"size:20;not null" json:"role"`
+	Content        string    `gorm:"type:text;not null" json:"content"`
+	Metadata       string    `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
+	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
+
+	// Relationships
+	Conversation Conversation `gorm:"foreignKey:ConversationID" json:"-"`
+}
+
 // PublicBot represents a bot with only public information (no config details)
 type PublicBot struct {
 	ID          string    `json:"id"`
