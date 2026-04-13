@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { MessageSquare, Send, Bot as BotIcon } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { MessageSquare, Send, Bot as BotIcon, StopCircle } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import './BotChat.css'
 
@@ -17,6 +17,7 @@ function PublicChat({ botId }) {
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const abortControllerRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -45,6 +46,12 @@ function PublicChat({ botId }) {
     }
   }, [botId])
 
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+  }
+
   const handleSendMessage = async (e) => {
     e.preventDefault()
     if (!inputMessage.trim() || isLoading || !bot) return
@@ -58,12 +65,15 @@ function PublicChat({ botId }) {
     const assistantMessage = { role: 'assistant', content: '', streaming: true }
     setMessages((prev) => [...prev, assistantMessage])
 
+    abortControllerRef.current = new AbortController()
+
     try {
       // Public endpoint ignores generation params from the client — the backend
       // pulls them from the bot's saved config. We only send the message.
       const response = await fetch(`${API_BASE}/chat/public/${bot.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortControllerRef.current.signal,
         body: JSON.stringify({ message: query, limit: 60 })
       })
 
@@ -122,17 +132,30 @@ function PublicChat({ botId }) {
         return next
       })
     } catch (err) {
-      console.error('Public chat error:', err)
-      setMessages((prev) => {
-        const next = [...prev]
-        next[next.length - 1] = {
-          role: 'assistant',
-          content: 'Error: Failed to get response',
-          streaming: false
-        }
-        return next
-      })
+      if (err.name === 'AbortError') {
+        setMessages((prev) => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          if (last.role === 'assistant') {
+            last.streaming = false
+            last.cancelled = true
+          }
+          return next
+        })
+      } else {
+        console.error('Public chat error:', err)
+        setMessages((prev) => {
+          const next = [...prev]
+          next[next.length - 1] = {
+            role: 'assistant',
+            content: 'Error: Failed to get response',
+            streaming: false
+          }
+          return next
+        })
+      }
     } finally {
+      abortControllerRef.current = null
       setIsLoading(false)
     }
   }
@@ -183,6 +206,7 @@ function PublicChat({ botId }) {
               <div className="message-content">
                 {msg.content}
                 {msg.streaming && <span className="cursor">▊</span>}
+                {msg.cancelled && <span className="cancelled-label"> (stopped)</span>}
               </div>
             </div>
           ))
@@ -198,13 +222,19 @@ function PublicChat({ botId }) {
           disabled={isLoading}
           className="chat-input"
         />
-        <button
-          type="submit"
-          disabled={isLoading || !inputMessage.trim()}
-          className="send-btn"
-        >
-          <Send size={20} />
-        </button>
+        {isLoading ? (
+          <button type="button" onClick={handleStopGeneration} className="send-btn stop-btn">
+            <StopCircle size={20} />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!inputMessage.trim()}
+            className="send-btn"
+          >
+            <Send size={20} />
+          </button>
+        )}
       </form>
     </div>
   )

@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { ArrowLeft, MessageSquare, Send } from 'lucide-react'
+import React, { useState, useRef } from 'react'
+import { ArrowLeft, MessageSquare, Send, StopCircle } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 import './BotChat.css'
 
@@ -9,6 +9,13 @@ function BotChat({ bot, token, onBack }) {
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const abortControllerRef = useRef(null)
+
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+  }
 
   const handleSendMessage = async (e) => {
     e.preventDefault()
@@ -22,12 +29,15 @@ function BotChat({ bot, token, onBack }) {
     const assistantMessage = { role: 'assistant', content: '', streaming: true }
     setMessages(prev => [...prev, assistantMessage])
 
+    abortControllerRef.current = new AbortController()
+
     try {
       const response = await fetch(`${API_BASE}/chat/public/${bot.id}`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json'
         },
+        signal: abortControllerRef.current.signal,
         body: JSON.stringify({
           message: inputMessage,
           limit: 60,
@@ -109,17 +119,30 @@ function BotChat({ bot, token, onBack }) {
       })
 
     } catch (err) {
-      console.error('Chat error:', err)
-      setMessages(prev => {
-        const newMessages = [...prev]
-        newMessages[newMessages.length - 1] = {
-          role: 'assistant',
-          content: 'Error: Failed to get response',
-          streaming: false
-        }
-        return newMessages
-      })
+      if (err.name === 'AbortError') {
+        setMessages(prev => {
+          const newMessages = [...prev]
+          const lastMsg = newMessages[newMessages.length - 1]
+          if (lastMsg.role === 'assistant') {
+            lastMsg.streaming = false
+            lastMsg.cancelled = true
+          }
+          return newMessages
+        })
+      } else {
+        console.error('Chat error:', err)
+        setMessages(prev => {
+          const newMessages = [...prev]
+          newMessages[newMessages.length - 1] = {
+            role: 'assistant',
+            content: 'Error: Failed to get response',
+            streaming: false
+          }
+          return newMessages
+        })
+      }
     } finally {
+      abortControllerRef.current = null
       setIsLoading(false)
     }
   }
@@ -151,6 +174,7 @@ function BotChat({ bot, token, onBack }) {
               <div className="message-content">
                 {msg.content}
                 {msg.streaming && <span className="cursor">▊</span>}
+                {msg.cancelled && <span className="cancelled-label"> (stopped)</span>}
               </div>
             </div>
           ))
@@ -166,9 +190,15 @@ function BotChat({ bot, token, onBack }) {
           disabled={isLoading}
           className="chat-input"
         />
-        <button type="submit" disabled={isLoading || !inputMessage.trim()} className="send-btn">
-          <Send size={20} />
-        </button>
+        {isLoading ? (
+          <button type="button" onClick={handleStopGeneration} className="send-btn stop-btn">
+            <StopCircle size={20} />
+          </button>
+        ) : (
+          <button type="submit" disabled={!inputMessage.trim()} className="send-btn">
+            <Send size={20} />
+          </button>
+        )}
       </form>
     </div>
   )
