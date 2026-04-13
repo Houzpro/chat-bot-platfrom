@@ -18,7 +18,7 @@ type JWTService struct {
 
 // Claims represents JWT claims
 type Claims struct {
-	UserID uint    `json:"user_id"`
+	UserID string  `json:"user_id"`
 	Email  string `json:"email"`
 	jwt.RegisteredClaims
 }
@@ -32,7 +32,7 @@ func NewJWTService(secretKey string, tokenDuration time.Duration) *JWTService {
 }
 
 // GenerateToken generates a new JWT token for a user
-func (s *JWTService) GenerateToken(userID uint, email string) (string, error) {
+func (s *JWTService) GenerateToken(userID string, email string) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		Email:  email,

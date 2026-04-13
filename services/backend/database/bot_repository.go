@@ -40,7 +40,7 @@ func (r *BotRepository) GetByID(id string) (*Bot, error) {
 }
 
 // GetByIDForOwner retrieves a bot by ID without is_active filter (for owner operations)
-func (r *BotRepository) GetByIDForOwner(id string, ownerID uint) (*Bot, error) {
+func (r *BotRepository) GetByIDForOwner(id string, ownerID string) (*Bot, error) {
 	var bot Bot
 	err := r.db.Conn.Where("id = ? AND owner_id = ?", id, ownerID).First(&bot).Error
 	if err == gorm.ErrRecordNotFound {
@@ -53,7 +53,7 @@ func (r *BotRepository) GetByIDForOwner(id string, ownerID uint) (*Bot, error) {
 }
 
 // GetByOwnerID retrieves all bots for a specific owner (including inactive)
-func (r *BotRepository) GetByOwnerID(ownerID uint) ([]*Bot, error) {
+func (r *BotRepository) GetByOwnerID(ownerID string) ([]*Bot, error) {
 	var bots []*Bot
 	err := r.db.Conn.Where("owner_id = ?", ownerID).
 		Order("is_active DESC, created_at DESC").
@@ -85,7 +85,7 @@ func (r *BotRepository) Update(bot *Bot) error {
 }
 
 // Delete soft deletes a bot by setting is_active to false
-func (r *BotRepository) Delete(id string, ownerID uint) error {
+func (r *BotRepository) Delete(id string, ownerID string) error {
 	result := r.db.Conn.
 		Where("id = ? AND owner_id = ? AND is_active = ?", id, ownerID, true).
 		Delete(&Bot{})
@@ -156,7 +156,7 @@ func (r *BotRepository) DeleteDocumentsByBotID(botID string) error {
 }
 
 // CheckOwnership verifies if a user owns a specific bot
-func (r *BotRepository) CheckOwnership(botID string, ownerID uint) (bool, error) {
+func (r *BotRepository) CheckOwnership(botID string, ownerID string) (bool, error) {
 	var count int64
 	err := r.db.Conn.Model(&Bot{}).
 		Where("id = ? AND owner_id = ? AND is_active = ?", botID, ownerID, true).

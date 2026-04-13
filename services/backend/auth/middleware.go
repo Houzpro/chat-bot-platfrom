@@ -63,8 +63,8 @@ func OptionalMiddleware(jwtService *JWTService) fiber.Handler {
 }
 
 // GetUserID extracts user ID from context
-func GetUserID(c *fiber.Ctx) (uint, bool) {
-	userID, ok := c.Locals("user_id").(uint)
+func GetUserID(c *fiber.Ctx) (string, bool) {
+	userID, ok := c.Locals("user_id").(string)
 	return userID, ok
 }
 

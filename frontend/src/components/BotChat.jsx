@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { ArrowLeft, MessageSquare, Send, StopCircle, Plus, Trash2 } from 'lucide-react'
-import { conversationsAPI } from '../api/client'
+import { ArrowLeft, MessageSquare, Send, StopCircle, Plus, Trash2, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { conversationsAPI, feedbackAPI } from '../api/client'
 import ThemeToggle from './ThemeToggle'
 import './BotChat.css'
 
@@ -52,8 +52,10 @@ function BotChat({ bot, token, onBack }) {
       const data = await conversationsAPI.get(convId)
       setMessages(
         (data.messages || []).map(m => ({
+          id: m.id,
           role: m.role,
           content: m.content,
+          feedback: null,
           streaming: false,
         }))
       )
@@ -74,6 +76,22 @@ function BotChat({ bot, token, onBack }) {
       }
     } catch (err) {
       console.error('Failed to delete conversation:', err)
+    }
+  }
+
+  const handleFeedback = async (msgIdx, rating) => {
+    const msg = messages[msgIdx]
+    if (!msg.id || msg.feedback) return // immutable — skip if already rated
+
+    try {
+      await feedbackAPI.submit(msg.id, rating)
+      setMessages(prev => {
+        const next = [...prev]
+        next[msgIdx] = { ...next[msgIdx], feedback: rating }
+        return next
+      })
+    } catch (err) {
+      console.error('Failed to submit feedback:', err)
     }
   }
 
@@ -113,6 +131,12 @@ function BotChat({ bot, token, onBack }) {
     abortControllerRef.current = new AbortController()
 
     try {
+      const contextWindow = bot.context_window || 10
+      const completedMessages = messages
+        .filter(m => !m.streaming)
+        .map(m => ({ role: m.role, content: m.content }))
+      const history = completedMessages.slice(-contextWindow)
+
       const response = await fetch(`${API_BASE}/chat/rag`, {
         method: 'POST',
         headers: {
@@ -125,13 +149,14 @@ function BotChat({ bot, token, onBack }) {
           query: query,
           conversation_id: convId,
           limit: 60,
+          history,
+          context_window: contextWindow,
           temperature: bot.temperature,
           top_p: bot.top_p,
           top_k: bot.top_k,
           max_new_tokens: bot.max_new_tokens,
           do_sample: bot.do_sample,
           system_prompt: bot.system_prompt,
-          context_window: bot.context_window || 0
         })
       })
 
@@ -183,7 +208,19 @@ function BotChat({ bot, token, onBack }) {
                 })
                 break
               }
-              if (parsed.type === 'done') break
+              if (parsed.type === 'done') {
+                if (parsed.message_id) {
+                  setMessages(prev => {
+                    const newMessages = [...prev]
+                    const lastMsg = newMessages[newMessages.length - 1]
+                    if (lastMsg.role === 'assistant') {
+                      lastMsg.id = parsed.message_id
+                    }
+                    return newMessages
+                  })
+                }
+                break
+              }
             } catch (e) {
               // Skip non-JSON lines
             }
@@ -295,6 +332,24 @@ function BotChat({ bot, token, onBack }) {
                     {msg.streaming && <span className="cursor">▊</span>}
                     {msg.cancelled && <span className="cancelled-label"> (stopped)</span>}
                   </div>
+                  {msg.role === 'assistant' && !msg.streaming && msg.id && (
+                    <div className={`message-feedback${msg.feedback ? ' rated' : ''}`}>
+                      <button
+                        className={`feedback-btn${msg.feedback === 1 ? ' active positive' : ''}`}
+                        onClick={() => handleFeedback(idx, 1)}
+                        title="Полезный ответ"
+                      >
+                        <ThumbsUp size={14} />
+                      </button>
+                      <button
+                        className={`feedback-btn${msg.feedback === -1 ? ' active negative' : ''}`}
+                        onClick={() => handleFeedback(idx, -1)}
+                        title="Неполезный ответ"
+                      >
+                        <ThumbsDown size={14} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))
             )}

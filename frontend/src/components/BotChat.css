@@ -154,6 +154,58 @@
   border-bottom-left-radius: var(--radius-sm);
 }
 
+/* ----- Feedback buttons ----- */
+
+.message-feedback {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.message:hover .message-feedback,
+.message-feedback:has(.active) {
+  opacity: 1;
+}
+
+.feedback-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.feedback-btn:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.feedback-btn.active.positive {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #22c55e;
+}
+
+.feedback-btn.active.negative {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+
+.message-feedback.rated .feedback-btn:not(.active) {
+  opacity: 0.3;
+  cursor: default;
+  pointer-events: none;
+}
+
 .cursor {
   display: inline-block;
   margin-left: 2px;

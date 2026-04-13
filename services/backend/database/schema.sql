@@ -1,6 +1,6 @@
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     name VARCHAR(255),
@@ -14,7 +14,7 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 -- Bots table
 CREATE TABLE IF NOT EXISTS bots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     -- Bot configuration (JSON)
@@ -56,7 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_bot_documents_bot_id ON bot_documents(bot_id);
 CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     title VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -68,7 +68,8 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
 -- Messages table (individual messages in a conversation)
 CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
-    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+    bot_id UUID REFERENCES bots(id) ON DELETE CASCADE,
     role VARCHAR(20) NOT NULL,
     content TEXT NOT NULL,
     metadata JSONB DEFAULT '{}',
@@ -77,6 +78,19 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_bot_id ON messages(bot_id);
+
+-- Message feedback (thumbs up/down)
+CREATE TABLE IF NOT EXISTS message_feedbacks (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    rating SMALLINT NOT NULL CHECK (rating IN (-1, 1)),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(message_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_feedbacks_message_id ON message_feedbacks(message_id);
 
 -- Trigger to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

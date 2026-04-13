@@ -55,9 +55,9 @@ func (r *UserRepository) GetByEmail(email string) (*User, error) {
 }
 
 // GetByID retrieves a user by ID
-func (r *UserRepository) GetByID(id uint) (*User, error) {
+func (r *UserRepository) GetByID(id string) (*User, error) {
 	var user User
-	err := r.db.Conn.First(&user, id).Error
+	err := r.db.Conn.Where("id = ?", id).First(&user).Error
 
 	if err == gorm.ErrRecordNotFound {
 		return nil, fmt.Errorf("user not found")

@@ -9,7 +9,7 @@ import (
 
 // User represents a registered user
 type User struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
+	ID           string    `gorm:"type:uuid;primaryKey" json:"id"`
 	Email        string    `gorm:"unique;not null;size:255" json:"email"`
 	PasswordHash string    `gorm:"not null;size:255" json:"-"` // Never expose in JSON
 	Name         string    `gorm:"size:255" json:"name"`
@@ -20,10 +20,18 @@ type User struct {
 	Bots []Bot `gorm:"foreignKey:OwnerID" json:"bots,omitempty"`
 }
 
+// BeforeCreate hook to generate UUID for User
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if u.ID == "" {
+		u.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // Bot represents a configured chatbot
 type Bot struct {
 	ID          string `gorm:"type:uuid;primaryKey" json:"id"`
-	OwnerID     uint   `gorm:"not null;index" json:"owner_id"`
+	OwnerID     string `gorm:"type:uuid;not null;index" json:"owner_id"`
 	Name        string `gorm:"not null;size:255" json:"name"`
 	Description string `gorm:"type:text" json:"description"`
 	Config      string `gorm:"type:jsonb;default:'{}'" json:"config"`
@@ -77,7 +85,7 @@ type BotDocument struct {
 type Conversation struct {
 	ID        string    `gorm:"type:uuid;primaryKey" json:"id"`
 	BotID     string    `gorm:"type:uuid;not null;index" json:"bot_id"`
-	UserID    *uint     `gorm:"index" json:"user_id,omitempty"`
+	UserID    *string   `gorm:"type:uuid;index" json:"user_id,omitempty"`
 	Title     string    `gorm:"size:255" json:"title"`
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
@@ -98,14 +106,27 @@ func (conv *Conversation) BeforeCreate(tx *gorm.DB) error {
 // Message represents a single message in a conversation
 type Message struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
-	ConversationID string    `gorm:"type:uuid;not null;index" json:"conversation_id"`
+	ConversationID *string   `gorm:"type:uuid;index" json:"conversation_id,omitempty"`
+	BotID          *string   `gorm:"type:uuid;index" json:"bot_id,omitempty"`
 	Role           string    `gorm:"size:20;not null" json:"role"`
 	Content        string    `gorm:"type:text;not null" json:"content"`
 	Metadata       string    `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
 	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
 
 	// Relationships
-	Conversation Conversation `gorm:"foreignKey:ConversationID" json:"-"`
+	Conversation *Conversation `gorm:"foreignKey:ConversationID" json:"-"`
+}
+
+// MessageFeedback represents a thumbs-up/down rating on an assistant message
+type MessageFeedback struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	MessageID uint      `gorm:"not null;uniqueIndex:idx_feedback_message_user" json:"message_id"`
+	UserID    *string   `gorm:"type:uuid;uniqueIndex:idx_feedback_message_user" json:"user_id,omitempty"`
+	Rating    int16     `gorm:"not null" json:"rating"` // 1 = thumbs up, -1 = thumbs down
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+
+	// Relationships
+	Message Message `gorm:"foreignKey:MessageID" json:"-"`
 }
 
 // PublicBot represents a bot with only public information (no config details)

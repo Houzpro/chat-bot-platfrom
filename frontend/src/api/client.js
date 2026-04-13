@@ -170,3 +170,33 @@ export const conversationsAPI = {
     })
   },
 }
+
+// Feedback API
+export const feedbackAPI = {
+  submit: async (messageId, rating) => {
+    return apiCall(`/messages/${messageId}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ rating }),
+    })
+  },
+
+  getStats: async (botId) => {
+    return apiCall(`/bots/${botId}/feedback/stats`)
+  },
+}
+
+// Public Feedback API (no auth required)
+export const publicFeedbackAPI = {
+  submit: async (messageId, rating) => {
+    const response = await fetch(`${API_BASE}/public/messages/${messageId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating }),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Network error' }))
+      throw new Error(error.error || `HTTP ${response.status}`)
+    }
+    return response.json()
+  },
+}

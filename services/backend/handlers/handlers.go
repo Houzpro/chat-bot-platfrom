@@ -646,15 +646,8 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 	c.Set("X-Accel-Buffering", "no")
 
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		// Save user message if conversation_id provided
+		// Auto-set conversation title from first message
 		if req.ConversationID != "" && h.convRepo != nil {
-			userMsg := &database.Message{
-				ConversationID: req.ConversationID,
-				Role:           "user",
-				Content:        req.Query,
-			}
-			h.convRepo.AddMessage(userMsg)
-			// Auto-set title from first message
 			conv, err := h.convRepo.GetConversationByID(req.ConversationID)
 			if err == nil && conv.Title == "New conversation" {
 				title := req.Query
@@ -691,23 +684,8 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 			contextWindow = req.ContextWindow
 		}
 
-		if req.ConversationID != "" && h.convRepo != nil {
-			// Load history from DB for authenticated chats
-			recentMsgs, err := h.convRepo.GetRecentMessages(req.ConversationID, contextWindow)
-			if err == nil && len(recentMsgs) > 0 {
-				for _, m := range recentMsgs {
-					// Skip the user message we just saved (it's the current query)
-					if m.Role == "user" && m.Content == req.Query {
-						continue
-					}
-					chatMessages = append(chatMessages, map[string]string{
-						"role":    m.Role,
-						"content": m.Content,
-					})
-				}
-			}
-		} else if len(req.History) > 0 {
-			// Use client-provided history for stateless (public) chats
+		// Use client-provided history for conversation context
+		if len(req.History) > 0 {
 			limit := contextWindow
 			if len(req.History) > limit {
 				req.History = req.History[len(req.History)-limit:]
@@ -763,14 +741,29 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 			}
 		}
 
-		// Save assistant message if conversation_id provided
-		if req.ConversationID != "" && h.convRepo != nil && fullResponse.Len() > 0 {
+		// Save assistant message (always, for feedback support)
+		if h.convRepo != nil && fullResponse.Len() > 0 {
 			assistantMsg := &database.Message{
-				ConversationID: req.ConversationID,
-				Role:           "assistant",
-				Content:        fullResponse.String(),
+				Role:    "assistant",
+				Content: fullResponse.String(),
+			}
+			if req.ConversationID != "" {
+				convID := req.ConversationID
+				assistantMsg.ConversationID = &convID
+			}
+			if req.ClientID != "" {
+				botID := req.ClientID
+				assistantMsg.BotID = &botID
 			}
 			h.convRepo.AddMessage(assistantMsg)
+
+			// Send message_id so frontend can attach feedback
+			doneJSON, _ := json.Marshal(map[string]interface{}{
+				"type":       "done",
+				"message_id": assistantMsg.ID,
+			})
+			fmt.Fprintf(w, "data: %s\n\n", doneJSON)
+			w.Flush()
 		}
 
 		fmt.Fprintf(w, "data: [DONE]\n\n")

@@ -144,6 +144,7 @@ func main() {
 	// Public bot routes (for chat access)
 	app.Get("/api/v1/bots/:id", botHandler.GetBot)
 	app.Post("/api/v1/chat/public/:bot_id", h.PublicRAGChat) // Public chat endpoint
+	app.Post("/api/v1/public/messages/:message_id/feedback", convHandler.PublicSubmitFeedback)
 
 	// Protected routes (require authentication)
 	protected := app.Group("/api/v1", auth.Middleware(jwtService))
@@ -170,6 +171,10 @@ func main() {
 	protected.Get("/bots/:id/conversations", convHandler.GetBotConversations)
 	protected.Get("/conversations/:conv_id", convHandler.GetConversation)
 	protected.Delete("/conversations/:conv_id", convHandler.DeleteConversation)
+
+	// Message feedback
+	protected.Post("/messages/:message_id/feedback", convHandler.SubmitFeedback)
+	protected.Get("/bots/:id/feedback/stats", convHandler.GetFeedbackStats)
 
 	// Graceful shutdown setup
 	quit := make(chan os.Signal, 1)

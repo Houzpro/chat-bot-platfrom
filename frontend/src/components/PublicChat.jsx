@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { MessageSquare, Send, Bot as BotIcon, StopCircle } from 'lucide-react'
+import { MessageSquare, Send, Bot as BotIcon, StopCircle, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { publicFeedbackAPI } from '../api/client'
 import ThemeToggle from './ThemeToggle'
 import './BotChat.css'
 
@@ -45,6 +46,22 @@ function PublicChat({ botId }) {
       cancelled = true
     }
   }, [botId])
+
+  const handleFeedback = async (msgIdx, rating) => {
+    const msg = messages[msgIdx]
+    if (!msg.id || msg.feedback) return // immutable — skip if already rated
+
+    try {
+      await publicFeedbackAPI.submit(msg.id, rating)
+      setMessages(prev => {
+        const next = [...prev]
+        next[msgIdx] = { ...next[msgIdx], feedback: rating }
+        return next
+      })
+    } catch (err) {
+      console.error('Failed to submit feedback:', err)
+    }
+  }
 
   const handleStopGeneration = () => {
     if (abortControllerRef.current) {
@@ -128,7 +145,17 @@ function PublicChat({ botId }) {
               })
               break
             }
-            if (parsed.type === 'done') break
+            if (parsed.type === 'done') {
+              if (parsed.message_id) {
+                setMessages((prev) => {
+                  const next = [...prev]
+                  const last = next[next.length - 1]
+                  if (last.role === 'assistant') last.id = parsed.message_id
+                  return next
+                })
+              }
+              break
+            }
           } catch {
             // skip non-JSON frames
           }
@@ -218,6 +245,24 @@ function PublicChat({ botId }) {
                 {msg.streaming && <span className="cursor">▊</span>}
                 {msg.cancelled && <span className="cancelled-label"> (stopped)</span>}
               </div>
+              {msg.role === 'assistant' && !msg.streaming && msg.id && (
+                <div className={`message-feedback${msg.feedback ? ' rated' : ''}`}>
+                  <button
+                    className={`feedback-btn${msg.feedback === 1 ? ' active positive' : ''}`}
+                    onClick={() => handleFeedback(idx, 1)}
+                    title="Полезный ответ"
+                  >
+                    <ThumbsUp size={14} />
+                  </button>
+                  <button
+                    className={`feedback-btn${msg.feedback === -1 ? ' active negative' : ''}`}
+                    onClick={() => handleFeedback(idx, -1)}
+                    title="Неполезный ответ"
+                  >
+                    <ThumbsDown size={14} />
+                  </button>
+                </div>
+              )}
             </div>
           ))
         )}

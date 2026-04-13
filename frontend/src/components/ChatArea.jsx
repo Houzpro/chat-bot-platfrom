@@ -1,14 +1,27 @@
 import React, { useRef, useEffect, useState } from 'react'
-import { Send, Loader, StopCircle } from 'lucide-react'
+import { Send, Loader, StopCircle, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { feedbackAPI } from '../api/client'
 import './ChatArea.css'
 
-function ChatArea({ messages, onSendMessage, onStopGeneration, isLoading }) {
+function ChatArea({ messages, onSendMessage, onStopGeneration, isLoading, onUpdateMessage }) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  const handleFeedback = async (msgIdx, rating) => {
+    const msg = messages[msgIdx]
+    if (!msg.id || msg.feedback) return // immutable — skip if already rated
+
+    try {
+      await feedbackAPI.submit(msg.id, rating)
+      onUpdateMessage?.(msgIdx, { feedback: rating })
+    } catch (err) {
+      console.error('Failed to submit feedback:', err)
+    }
+  }
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -57,6 +70,24 @@ function ChatArea({ messages, onSendMessage, onStopGeneration, isLoading }) {
                 )}
                 {msg.cancelled && (
                   <div className="message-cancelled">⏸️ Генерация остановлена</div>
+                )}
+                {msg.role === 'assistant' && !msg.streaming && msg.id && (
+                  <div className={`message-feedback${msg.feedback ? ' rated' : ''}`}>
+                    <button
+                      className={`feedback-btn${msg.feedback === 1 ? ' active positive' : ''}`}
+                      onClick={() => handleFeedback(idx, 1)}
+                      title="Полезный ответ"
+                    >
+                      <ThumbsUp size={14} />
+                    </button>
+                    <button
+                      className={`feedback-btn${msg.feedback === -1 ? ' active negative' : ''}`}
+                      onClick={() => handleFeedback(idx, -1)}
+                      title="Неполезный ответ"
+                    >
+                      <ThumbsDown size={14} />
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
