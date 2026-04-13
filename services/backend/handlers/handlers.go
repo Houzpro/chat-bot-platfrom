@@ -20,9 +20,10 @@ import (
 )
 
 type Handler struct {
-	cfg     *config.Config
-	client  *clients.Client
-	botRepo *database.BotRepository
+	cfg      *config.Config
+	client   *clients.Client
+	botRepo  *database.BotRepository
+	convRepo *database.ConversationRepository
 }
 
 // clampContext limits context size to avoid exceeding model window.
@@ -97,11 +98,12 @@ func normalizeBotID(botID string) string {
 	return strings.TrimPrefix(botID, "bot_")
 }
 
-func NewHandler(cfg *config.Config, client *clients.Client, botRepo *database.BotRepository) *Handler {
+func NewHandler(cfg *config.Config, client *clients.Client, botRepo *database.BotRepository, convRepo *database.ConversationRepository) *Handler {
 	return &Handler{
-		cfg:     cfg,
-		client:  client,
-		botRepo: botRepo,
+		cfg:      cfg,
+		client:   client,
+		botRepo:  botRepo,
+		convRepo: convRepo,
 	}
 }
 

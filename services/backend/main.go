@@ -55,6 +55,7 @@ func main() {
 	// Initialize repositories
 	userRepo := database.NewUserRepository(db)
 	botRepo := database.NewBotRepository(db)
+	convRepo := database.NewConversationRepository(db)
 
 	// Initialize JWT service
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -83,9 +84,10 @@ func main() {
 
 	// Initialize client and handlers
 	serviceClient := clients.NewClient(httpClient)
-	h := handlers.NewHandler(cfg, serviceClient, botRepo)
+	h := handlers.NewHandler(cfg, serviceClient, botRepo, convRepo)
 	authHandler := handlers.NewAuthHandler(userRepo, jwtService)
 	botHandler := handlers.NewBotHandler(botRepo)
+	convHandler := handlers.NewConversationHandler(convRepo, botRepo)
 
 	// Create Fiber app with optimizations for high load
 	app := fiber.New(fiber.Config{
@@ -162,6 +164,12 @@ func main() {
 
 	// RAG chat
 	protected.Post("/chat/rag", h.RAGChat)
+
+	// Conversation management
+	protected.Post("/conversations", convHandler.CreateConversation)
+	protected.Get("/bots/:id/conversations", convHandler.GetBotConversations)
+	protected.Get("/conversations/:conv_id", convHandler.GetConversation)
+	protected.Delete("/conversations/:conv_id", convHandler.DeleteConversation)
 
 	// Graceful shutdown setup
 	quit := make(chan os.Signal, 1)
