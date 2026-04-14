@@ -150,8 +150,8 @@ func (h *ConversationHandler) SubmitFeedback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	messageID, err := c.ParamsInt("message_id")
-	if err != nil || messageID <= 0 {
+	messageID := c.Params("message_id")
+	if messageID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid message_id"})
 	}
 
@@ -166,7 +166,7 @@ func (h *ConversationHandler) SubmitFeedback(c *fiber.Ctx) error {
 	}
 
 	// Verify message exists and belongs to user
-	msg, err := h.convRepo.GetMessageByID(uint(messageID))
+	msg, err := h.convRepo.GetMessageByID(messageID)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "message not found"})
 	}
@@ -187,7 +187,7 @@ func (h *ConversationHandler) SubmitFeedback(c *fiber.Ctx) error {
 	}
 
 	fb := &database.MessageFeedback{
-		MessageID: uint(messageID),
+		MessageID: messageID,
 		UserID:    &userID,
 		Rating:    body.Rating,
 	}
@@ -232,8 +232,8 @@ func (h *ConversationHandler) GetFeedbackStats(c *fiber.Ctx) error {
 // PublicSubmitFeedback allows anonymous users to rate a message
 // POST /api/v1/public/messages/:message_id/feedback
 func (h *ConversationHandler) PublicSubmitFeedback(c *fiber.Ctx) error {
-	messageID, err := c.ParamsInt("message_id")
-	if err != nil || messageID <= 0 {
+	messageID := c.Params("message_id")
+	if messageID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid message_id"})
 	}
 
@@ -248,13 +248,13 @@ func (h *ConversationHandler) PublicSubmitFeedback(c *fiber.Ctx) error {
 	}
 
 	// Verify message exists
-	_, err = h.convRepo.GetMessageByID(uint(messageID))
+	_, err := h.convRepo.GetMessageByID(messageID)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "message not found"})
 	}
 
 	fb := &database.MessageFeedback{
-		MessageID: uint(messageID),
+		MessageID: messageID,
 		UserID:    nil, // anonymous
 		Rating:    body.Rating,
 	}

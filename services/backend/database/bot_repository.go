@@ -123,7 +123,7 @@ func (r *BotRepository) GetDocuments(botID string) ([]BotDocument, error) {
 }
 
 // GetDocumentByID retrieves a single document by its ID
-func (r *BotRepository) GetDocumentByID(docID uint) (*BotDocument, error) {
+func (r *BotRepository) GetDocumentByID(docID string) (*BotDocument, error) {
 	var doc BotDocument
 	err := r.db.Conn.Where("id = ?", docID).First(&doc).Error
 	if err == gorm.ErrRecordNotFound {
@@ -136,7 +136,7 @@ func (r *BotRepository) GetDocumentByID(docID uint) (*BotDocument, error) {
 }
 
 // DeleteDocument removes a document metadata entry
-func (r *BotRepository) DeleteDocument(docID uint, botID string) error {
+func (r *BotRepository) DeleteDocument(docID string, botID string) error {
 	result := r.db.Conn.Where("id = ? AND bot_id = ?", docID, botID).Delete(&BotDocument{})
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete document: %w", result.Error)

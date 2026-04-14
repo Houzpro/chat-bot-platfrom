@@ -26,9 +26,10 @@ CREATE TABLE IF NOT EXISTS bots (
     max_new_tokens INTEGER DEFAULT 512,
     do_sample BOOLEAN DEFAULT true,
     system_prompt TEXT,
-    -- RAG settings (chunk configuration)
-    chunk_size INTEGER DEFAULT 800,
+    -- RAG settings (chunk configuration; defaults mirror env CHUNK_SIZE/CHUNK_OVERLAP/CHAT_CONTEXT_WINDOW)
+    chunk_size INTEGER DEFAULT 1200,
     chunk_overlap INTEGER DEFAULT 200,
+    context_window INTEGER DEFAULT 5,
     -- Status
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -41,7 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_bots_is_active ON bots(is_active);
 
 -- Bot documents tracking (metadata only, actual vectors in Qdrant)
 CREATE TABLE IF NOT EXISTS bot_documents (
-    id SERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
     filename VARCHAR(255) NOT NULL,
     file_type VARCHAR(50),
@@ -67,7 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
 
 -- Messages table (individual messages in a conversation)
 CREATE TABLE IF NOT EXISTS messages (
-    id SERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
     bot_id UUID REFERENCES bots(id) ON DELETE CASCADE,
     role VARCHAR(20) NOT NULL,
@@ -82,8 +83,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_bot_id ON messages(bot_id);
 
 -- Message feedback (thumbs up/down)
 CREATE TABLE IF NOT EXISTS message_feedbacks (
-    id SERIAL PRIMARY KEY,
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     rating SMALLINT NOT NULL CHECK (rating IN (-1, 1)),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

@@ -69,7 +69,7 @@ func (b *Bot) BeforeCreate(tx *gorm.DB) error {
 
 // BotDocument represents metadata about documents uploaded for a bot
 type BotDocument struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
+	ID          string    `gorm:"type:uuid;primaryKey" json:"id"`
 	BotID       string    `gorm:"type:uuid;not null;index" json:"bot_id"`
 	Filename    string    `gorm:"not null;size:255" json:"filename"`
 	FileType    string    `gorm:"size:50" json:"file_type"`
@@ -79,6 +79,14 @@ type BotDocument struct {
 
 	// Relationships
 	Bot Bot `gorm:"foreignKey:BotID" json:"bot,omitempty"`
+}
+
+// BeforeCreate hook to generate UUID for BotDocument
+func (d *BotDocument) BeforeCreate(tx *gorm.DB) error {
+	if d.ID == "" {
+		d.ID = uuid.New().String()
+	}
+	return nil
 }
 
 // Conversation represents a chat conversation (dialog) for a bot
@@ -105,7 +113,7 @@ func (conv *Conversation) BeforeCreate(tx *gorm.DB) error {
 
 // Message represents a single message in a conversation
 type Message struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
+	ID             string    `gorm:"type:uuid;primaryKey" json:"id"`
 	ConversationID *string   `gorm:"type:uuid;index" json:"conversation_id,omitempty"`
 	BotID          *string   `gorm:"type:uuid;index" json:"bot_id,omitempty"`
 	Role           string    `gorm:"size:20;not null" json:"role"`
@@ -117,16 +125,32 @@ type Message struct {
 	Conversation *Conversation `gorm:"foreignKey:ConversationID" json:"-"`
 }
 
+// BeforeCreate hook to generate UUID for Message
+func (m *Message) BeforeCreate(tx *gorm.DB) error {
+	if m.ID == "" {
+		m.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // MessageFeedback represents a thumbs-up/down rating on an assistant message
 type MessageFeedback struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	MessageID uint      `gorm:"not null;uniqueIndex:idx_feedback_message_user" json:"message_id"`
+	ID        string    `gorm:"type:uuid;primaryKey" json:"id"`
+	MessageID string    `gorm:"type:uuid;not null;uniqueIndex:idx_feedback_message_user" json:"message_id"`
 	UserID    *string   `gorm:"type:uuid;uniqueIndex:idx_feedback_message_user" json:"user_id,omitempty"`
 	Rating    int16     `gorm:"not null" json:"rating"` // 1 = thumbs up, -1 = thumbs down
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 
 	// Relationships
 	Message Message `gorm:"foreignKey:MessageID" json:"-"`
+}
+
+// BeforeCreate hook to generate UUID for MessageFeedback
+func (f *MessageFeedback) BeforeCreate(tx *gorm.DB) error {
+	if f.ID == "" {
+		f.ID = uuid.New().String()
+	}
+	return nil
 }
 
 // PublicBot represents a bot with only public information (no config details)

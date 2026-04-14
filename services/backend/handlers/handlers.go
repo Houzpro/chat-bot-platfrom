@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -270,9 +269,8 @@ func (h *Handler) DeleteBotDocument(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
 	}
 
-	docIDStr := c.Params("doc_id")
-	docID, err := strconv.ParseUint(docIDStr, 10, 64)
-	if err != nil {
+	docID := c.Params("doc_id")
+	if docID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid document id"})
 	}
 
@@ -283,7 +281,7 @@ func (h *Handler) DeleteBotDocument(c *fiber.Ctx) error {
 	}
 
 	// Get document metadata to find the filename
-	doc, err := h.botRepo.GetDocumentByID(uint(docID))
+	doc, err := h.botRepo.GetDocumentByID(docID)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "document not found"})
 	}
@@ -298,11 +296,11 @@ func (h *Handler) DeleteBotDocument(c *fiber.Ctx) error {
 	}
 
 	// Delete metadata from database
-	if err := h.botRepo.DeleteDocument(uint(docID), botID); err != nil {
+	if err := h.botRepo.DeleteDocument(docID, botID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete document"})
 	}
 
-	log.Printf("[DeleteBotDocument] Deleted document %d (%s) from bot %s", docID, doc.Filename, botID)
+	log.Printf("[DeleteBotDocument] Deleted document %s (%s) from bot %s", docID, doc.Filename, botID)
 	return c.JSON(fiber.Map{
 		"success":   true,
 		"message":   "document deleted",
@@ -646,7 +644,7 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 	c.Set("X-Accel-Buffering", "no")
 
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		// Auto-set conversation title from first message
+		// Auto-set conversation title from first message (authenticated chat only)
 		if req.ConversationID != "" && h.convRepo != nil {
 			conv, err := h.convRepo.GetConversationByID(req.ConversationID)
 			if err == nil && conv.Title == "New conversation" {
@@ -656,6 +654,23 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 				}
 				h.convRepo.UpdateConversationTitle(req.ConversationID, title)
 			}
+		}
+
+		// Save user message (both public and authenticated chat)
+		if h.convRepo != nil {
+			userMsg := &database.Message{
+				Role:    "user",
+				Content: req.Query,
+			}
+			if req.ConversationID != "" {
+				convID := req.ConversationID
+				userMsg.ConversationID = &convID
+			}
+			if req.ClientID != "" {
+				botID := req.ClientID
+				userMsg.BotID = &botID
+			}
+			h.convRepo.AddMessage(userMsg)
 		}
 
 		// Send documents

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"backend/auth"
+	"backend/config"
 	"backend/database"
 	"strings"
 
@@ -11,43 +12,49 @@ import (
 
 type BotHandler struct {
 	botRepo *database.BotRepository
+	cfg     *config.Config
 }
 
-func NewBotHandler(botRepo *database.BotRepository) *BotHandler {
+func NewBotHandler(botRepo *database.BotRepository, cfg *config.Config) *BotHandler {
 	return &BotHandler{
 		botRepo: botRepo,
+		cfg:     cfg,
 	}
 }
 
 // CreateBotRequest represents a request to create a new bot
 type CreateBotRequest struct {
-	Name         string  `json:"name" validate:"required,min=3,max=100"`
-	Description  string  `json:"description" validate:"max=500"`
-	Temperature  float64 `json:"temperature" validate:"omitempty,gte=0,lte=2"`
-	TopP         float64 `json:"top_p" validate:"omitempty,gte=0,lte=1"`
-	TopK         int     `json:"top_k" validate:"omitempty,gte=1,lte=200"`
-	MaxNewTokens int     `json:"max_new_tokens" validate:"omitempty,gte=32,lte=8192"`
-	DoSample     bool    `json:"do_sample"`
-	SystemPrompt string  `json:"system_prompt" validate:"omitempty,max=2000"`
-	RAGTopK      int     `json:"rag_top_k" validate:"omitempty,gte=1,lte=10"`
-	ChunkSize    int     `json:"chunk_size" validate:"omitempty,gte=100,lte=5000"`
-	ChunkOverlap int     `json:"chunk_overlap" validate:"omitempty,gte=0,lte=1000"`
+	Name          string  `json:"name" validate:"required,min=3,max=100"`
+	Description   string  `json:"description" validate:"max=500"`
+	Temperature   float64 `json:"temperature" validate:"omitempty,gte=0,lte=2"`
+	TopP          float64 `json:"top_p" validate:"omitempty,gte=0,lte=1"`
+	TopK          int     `json:"top_k" validate:"omitempty,gte=1,lte=200"`
+	MaxNewTokens  int     `json:"max_new_tokens" validate:"omitempty,gte=32,lte=8192"`
+	DoSample      bool    `json:"do_sample"`
+	SystemPrompt  string  `json:"system_prompt" validate:"omitempty,max=2000"`
+	RAGTopK       int     `json:"rag_top_k" validate:"omitempty,gte=1,lte=10"`
+	ChunkSize     int     `json:"chunk_size" validate:"omitempty,gte=100,lte=5000"`
+	ChunkOverlap  int     `json:"chunk_overlap" validate:"omitempty,gte=0,lte=1000"`
+	ContextWindow int     `json:"context_window" validate:"omitempty,gte=0,lte=50"`
 }
 
-// UpdateBotRequest represents a request to update an existing bot
+// UpdateBotRequest represents a request to update an existing bot.
+// Numeric/bool fields are pointers so an omitted value is distinguishable from 0
+// (otherwise zero-values would overwrite existing settings — e.g. chunk_overlap 0).
 type UpdateBotRequest struct {
-	Name         string  `json:"name" validate:"omitempty,min=3,max=100"`
-	Description  string  `json:"description" validate:"omitempty,max=500"`
-	Temperature  float64 `json:"temperature" validate:"omitempty,gte=0,lte=2"`
-	TopP         float64 `json:"top_p" validate:"omitempty,gte=0,lte=1"`
-	TopK         int     `json:"top_k" validate:"omitempty,gte=1,lte=200"`
-	MaxNewTokens int     `json:"max_new_tokens" validate:"omitempty,gte=32,lte=8192"`
-	DoSample     *bool   `json:"do_sample"`
-	IsActive     *bool   `json:"is_active"`
-	SystemPrompt string  `json:"system_prompt" validate:"omitempty,max=2000"`
-	RAGTopK      int     `json:"rag_top_k" validate:"omitempty,gte=1,lte=10"`
-	ChunkSize    int     `json:"chunk_size" validate:"omitempty,gte=100,lte=5000"`
-	ChunkOverlap int     `json:"chunk_overlap" validate:"omitempty,gte=0,lte=1000"`
+	Name          string   `json:"name" validate:"omitempty,min=3,max=100"`
+	Description   string   `json:"description" validate:"omitempty,max=500"`
+	Temperature   *float64 `json:"temperature" validate:"omitempty,gte=0,lte=2"`
+	TopP          *float64 `json:"top_p" validate:"omitempty,gte=0,lte=1"`
+	TopK          *int     `json:"top_k" validate:"omitempty,gte=1,lte=200"`
+	MaxNewTokens  *int     `json:"max_new_tokens" validate:"omitempty,gte=32,lte=8192"`
+	DoSample      *bool    `json:"do_sample"`
+	IsActive      *bool    `json:"is_active"`
+	SystemPrompt  string   `json:"system_prompt" validate:"omitempty,max=2000"`
+	RAGTopK       *int     `json:"rag_top_k" validate:"omitempty,gte=1,lte=10"`
+	ChunkSize     *int     `json:"chunk_size" validate:"omitempty,gte=100,lte=5000"`
+	ChunkOverlap  *int     `json:"chunk_overlap" validate:"omitempty,gte=0,lte=1000"`
+	ContextWindow *int     `json:"context_window" validate:"omitempty,gte=0,lte=50"`
 }
 
 // CreateBot creates a new bot
@@ -66,44 +73,49 @@ func (h *BotHandler) CreateBot(c *fiber.Ctx) error {
 		})
 	}
 
-	// Set defaults
+	// Set defaults from env/config
+	gen := h.cfg.Generation
 	if req.Temperature == 0 {
-		req.Temperature = 0.75
+		req.Temperature = gen.Temperature
 	}
 	if req.TopP == 0 {
-		req.TopP = 0.92
+		req.TopP = gen.TopP
 	}
 	if req.TopK == 0 {
-		req.TopK = 40
+		req.TopK = gen.TopK
 	}
 	if req.MaxNewTokens == 0 {
-		req.MaxNewTokens = 512
+		req.MaxNewTokens = gen.MaxNewTokens
 	}
 	if req.ChunkSize == 0 {
-		req.ChunkSize = 800
+		req.ChunkSize = h.cfg.RAG.ChunkSize
 	}
 	if req.ChunkOverlap == 0 {
-		req.ChunkOverlap = 200
+		req.ChunkOverlap = h.cfg.RAG.ChunkOverlap
+	}
+	if req.ContextWindow == 0 {
+		req.ContextWindow = h.cfg.RAG.ContextWindowSize
 	}
 	if req.SystemPrompt == "" {
-		req.SystemPrompt = "You are a helpful assistant. /no_think"
+		req.SystemPrompt = gen.SystemBase
 	}
 
 	bot := &database.Bot{
-		ID:           uuid.New().String(),
-		OwnerID:      userID,
-		Name:         strings.TrimSpace(req.Name),
-		Description:  strings.TrimSpace(req.Description),
-		Config:       "{}",
-		Temperature:  req.Temperature,
-		TopP:         req.TopP,
-		TopK:         req.TopK,
-		MaxNewTokens: req.MaxNewTokens,
-		DoSample:     req.DoSample,
-		SystemPrompt: req.SystemPrompt,
-		ChunkSize:    req.ChunkSize,
-		ChunkOverlap: req.ChunkOverlap,
-		IsActive:     true,
+		ID:            uuid.New().String(),
+		OwnerID:       userID,
+		Name:          strings.TrimSpace(req.Name),
+		Description:   strings.TrimSpace(req.Description),
+		Config:        "{}",
+		Temperature:   req.Temperature,
+		TopP:          req.TopP,
+		TopK:          req.TopK,
+		MaxNewTokens:  req.MaxNewTokens,
+		DoSample:      req.DoSample,
+		SystemPrompt:  req.SystemPrompt,
+		ChunkSize:     req.ChunkSize,
+		ChunkOverlap:  req.ChunkOverlap,
+		ContextWindow: req.ContextWindow,
+		IsActive:      true,
 	}
 
 	createdBot, err := h.botRepo.Create(bot)
@@ -203,17 +215,17 @@ func (h *BotHandler) UpdateBot(c *fiber.Ctx) error {
 	if req.Description != "" {
 		bot.Description = strings.TrimSpace(req.Description)
 	}
-	if req.Temperature > 0 {
-		bot.Temperature = req.Temperature
+	if req.Temperature != nil {
+		bot.Temperature = *req.Temperature
 	}
-	if req.TopP > 0 {
-		bot.TopP = req.TopP
+	if req.TopP != nil {
+		bot.TopP = *req.TopP
 	}
-	if req.TopK > 0 {
-		bot.TopK = req.TopK
+	if req.TopK != nil {
+		bot.TopK = *req.TopK
 	}
-	if req.MaxNewTokens > 0 {
-		bot.MaxNewTokens = req.MaxNewTokens
+	if req.MaxNewTokens != nil {
+		bot.MaxNewTokens = *req.MaxNewTokens
 	}
 	if req.DoSample != nil {
 		bot.DoSample = *req.DoSample
@@ -224,11 +236,14 @@ func (h *BotHandler) UpdateBot(c *fiber.Ctx) error {
 	if req.SystemPrompt != "" {
 		bot.SystemPrompt = req.SystemPrompt
 	}
-	if req.ChunkSize > 0 {
-		bot.ChunkSize = req.ChunkSize
+	if req.ChunkSize != nil {
+		bot.ChunkSize = *req.ChunkSize
 	}
-	if req.ChunkOverlap >= 0 {
-		bot.ChunkOverlap = req.ChunkOverlap
+	if req.ChunkOverlap != nil {
+		bot.ChunkOverlap = *req.ChunkOverlap
+	}
+	if req.ContextWindow != nil {
+		bot.ContextWindow = *req.ContextWindow
 	}
 
 	if err := h.botRepo.Update(bot); err != nil {

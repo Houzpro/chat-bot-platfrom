@@ -86,7 +86,7 @@ func main() {
 	serviceClient := clients.NewClient(httpClient)
 	h := handlers.NewHandler(cfg, serviceClient, botRepo, convRepo)
 	authHandler := handlers.NewAuthHandler(userRepo, jwtService)
-	botHandler := handlers.NewBotHandler(botRepo)
+	botHandler := handlers.NewBotHandler(botRepo, cfg)
 	convHandler := handlers.NewConversationHandler(convRepo, botRepo)
 
 	// Create Fiber app with optimizations for high load

@@ -200,7 +200,7 @@ func (r *ConversationRepository) GetFeedbackStats(botID string) (*FeedbackStats,
 }
 
 // GetMessageByID returns a single message by its ID.
-func (r *ConversationRepository) GetMessageByID(id uint) (*Message, error) {
+func (r *ConversationRepository) GetMessageByID(id string) (*Message, error) {
 	var msg Message
 	err := r.db.Conn.Where("id = ?", id).First(&msg).Error
 	if err == gorm.ErrRecordNotFound {
