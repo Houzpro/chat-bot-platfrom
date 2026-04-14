@@ -584,6 +584,57 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 		return h.streamRAGResponse(c, req, docs, contextStr)
 	}
 
+	// Cross-lingual boost: if python-ai translated the query to the corpus language,
+	// run a second vector search with the translated embedding so Qdrant candidates
+	// are actually in the right language (first pass used the original-language
+	// embedding). Article finding #1: language matching gives +29pp accuracy.
+	if translated, ok := advancedResult["translated_query"].(string); ok && translated != "" {
+		log.Printf("🌐 [Advanced RAG] Translated query: '%s' — re-running retrieval", translated)
+		translatedEmb, tErr := h.client.CreateQueryEmbeddings(h.cfg.Services.AIURL, []string{translated})
+		if tErr == nil && len(translatedEmb) > 0 {
+			translatedVec, sErr := h.client.SearchVectorDocuments(h.cfg.Services.VectorURL, botID, translatedEmb[0], searchLimit)
+			if sErr == nil && len(translatedVec) > 0 {
+				// Merge original + translated candidates, deduped by id
+				seen := make(map[string]struct{}, len(vectorResults)+len(translatedVec))
+				merged := make([]map[string]any, 0, len(vectorResults)+len(translatedVec))
+				for _, doc := range vectorResults {
+					if id, ok := doc["id"].(string); ok && id != "" {
+						seen[id] = struct{}{}
+					}
+					merged = append(merged, doc)
+				}
+				for _, doc := range translatedVec {
+					id, _ := doc["id"].(string)
+					if id == "" {
+						merged = append(merged, doc)
+						continue
+					}
+					if _, dup := seen[id]; !dup {
+						seen[id] = struct{}{}
+						merged = append(merged, doc)
+					}
+				}
+				log.Printf("🌐 [Advanced RAG] Merged candidates: %d (was %d)", len(merged), len(vectorResults))
+
+				// Re-run advanced_search with translated query + merged candidates
+				retryResult, rErr := h.client.AdvancedSearch(
+					h.cfg.Services.AIURL,
+					botID,
+					translated,
+					merged,
+					allDocs,
+					35,
+					h.cfg.RAG.MaxContextChars,
+				)
+				if rErr == nil {
+					advancedResult = retryResult
+				} else {
+					log.Printf("⚠️ [Advanced RAG] Re-run failed: %v (keeping first-pass results)", rErr)
+				}
+			}
+		}
+	}
+
 	// Извлекаем результаты
 	results, _ := advancedResult["results"].([]any)
 	compressedContext, _ := advancedResult["compressed_context"].(string)

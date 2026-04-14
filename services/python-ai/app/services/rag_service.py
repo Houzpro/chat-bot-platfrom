@@ -535,6 +535,45 @@ class RAGService:
             print(f"  Language mismatch detected: query={query_lang}, docs={doc_lang}")
         return mismatch
 
+    def translate_query(self, query: str, target_lang: str) -> Optional[str]:
+        """
+        Translate query to target_lang via llama.cpp server.
+        Article finding #1: matching query/document language gives +29pp accuracy.
+        Returns None on failure so the caller can fall back to the original query.
+        """
+        try:
+            from app.services.model_service_gguf import model_service_gguf
+        except Exception as e:
+            print(f"  translate_query: llama client unavailable ({e})")
+            return None
+
+        lang_name = {"ru": "Russian", "en": "English"}.get(target_lang, target_lang)
+        system = (
+            f"You are a translator. Translate the user's text to {lang_name}. "
+            "Reply with ONLY the translation, no explanation, no quotes, no preamble."
+        )
+        try:
+            translated = model_service_gguf.generate_response(
+                messages=[{"role": "user", "content": query}],
+                max_new_tokens=128,
+                temperature=0.0,
+                do_sample=False,
+                system_prompt=system,
+            )
+        except Exception as e:
+            print(f"  translate_query: LLM call failed ({e})")
+            return None
+
+        translated = (translated or "").strip().strip('"').strip("'")
+        # Strip common preamble artifacts (chain-of-thought, "Translation:" etc.)
+        for prefix in ("Translation:", "translation:", "Перевод:", "перевод:"):
+            if translated.startswith(prefix):
+                translated = translated[len(prefix):].strip()
+        if not translated or translated.lower() == query.lower():
+            return None
+        print(f"  Query translated ({target_lang}): '{query[:60]}' -> '{translated[:60]}'")
+        return translated
+
     # ═══════════════════════════════════════════════════════════════
     # RELEVANCE SCORING
     # ═══════════════════════════════════════════════════════════════
@@ -964,17 +1003,31 @@ class RAGService:
               f"lang={router_decision.detected_language}, "
               f"enum={router_decision.is_enumeration}")
 
-        # Step 2: Language mismatch detection (article finding #1)
+        # Step 2: Language mismatch detection (article finding #1, +29pp)
         all_docs_list = all_documents or vector_results
         lang_mismatch = self.detect_language_mismatch(query, all_docs_list)
-        if lang_mismatch and router_decision.query_type in ("global", "enumeration"):
-            # Article finding #6: cross-language global query -> force full_document_read
-            print(f"  Cross-language global query detected, forcing full_document_read")
-            router_decision.suggested_tool = "full_document_read"
 
-        # Step 3: Self-correction loop with tiered retrieval
+        # Translate query to document language so retrieval (cosine rerank, BM25,
+        # rephrasing) operates in the same language as the corpus.
+        effective_query = query
+        if lang_mismatch:
+            doc_texts = " ".join(
+                doc.get('text', '')[:200] for doc in all_docs_list[:5]
+            )
+            doc_lang = detect_language(doc_texts)
+            if doc_lang in ("ru", "en"):
+                translated = self.translate_query(query, doc_lang)
+                if translated:
+                    effective_query = translated
+
+            if router_decision.query_type in ("global", "enumeration"):
+                # Article finding #6: cross-language global query -> full_document_read
+                print(f"  Cross-language global query detected, forcing full_document_read")
+                router_decision.suggested_tool = "full_document_read"
+
+        # Step 3: Self-correction loop with tiered retrieval (use translated query)
         results = self.self_correction_search(
-            query=query,
+            query=effective_query,
             vector_results=vector_results,
             all_documents=all_docs_list,
             router_decision=router_decision,
@@ -1004,6 +1057,9 @@ class RAGService:
             "trace": trace.to_dict(),
             "prompt_addition": prompt_addition,
             "router_decision": asdict(router_decision),
+            # Translated query (same language as corpus) when lang mismatch was
+            # detected; caller may re-run vector search with this for +recall.
+            "translated_query": effective_query if effective_query != query else None,
         }
 
     # ─── Context Building ──────────────────────────────────────────
