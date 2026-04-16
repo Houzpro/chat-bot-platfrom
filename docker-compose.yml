@@ -44,14 +44,25 @@ services:
       - ./models:/models
     ports:
       - "${LLAMA_CPP_PORT:-8090}:8080"
-    command: >
-      --model /models/${GGUF_MODEL_FILE:-qwen3-4b-q4_k_m.gguf}
-      --host 0.0.0.0
-      --port 8080
-      --ctx-size ${N_CTX:-32768}
-      --threads ${N_THREADS:-6}
-      --n-gpu-layers ${N_GPU_LAYERS:-0}
-      --parallel ${LLAMA_PARALLEL:-2}
+    command:
+      - --model
+      - /models/${GGUF_MODEL_FILE:-Qwen3.5-4B-Q4_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - "${N_CTX:-8192}"
+      - --threads
+      - "${N_THREADS:-6}"
+      - --n-gpu-layers
+      - "${N_GPU_LAYERS:-0}"
+      - --parallel
+      - "${LLAMA_PARALLEL:-1}"
+      - --reasoning-budget
+      - "${LLAMA_REASONING_BUDGET:--1}"
+      - --chat-template-kwargs
+      - ${LLAMA_CHAT_TEMPLATE_KWARGS:-{}}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
       interval: 30s
@@ -77,6 +88,9 @@ services:
       GEN_TOP_P: ${GEN_TOP_P}
       GEN_TOP_K: ${GEN_TOP_K}
       GEN_DO_SAMPLE: ${GEN_DO_SAMPLE}
+      GEN_PRESENCE_PENALTY: ${GEN_PRESENCE_PENALTY}
+      GEN_FREQUENCY_PENALTY: ${GEN_FREQUENCY_PENALTY}
+      GEN_MIN_P: ${GEN_MIN_P}
       GEN_SYSTEM_BASE_PROMPT: ${GEN_SYSTEM_BASE_PROMPT}
       GEN_USER_PROMPT: ${GEN_USER_PROMPT}
       GEN_STOP_SEQUENCES: ${GEN_STOP_SEQUENCES}
@@ -177,6 +191,9 @@ services:
       GEN_TOP_P: ${GEN_TOP_P}
       GEN_TOP_K: ${GEN_TOP_K}
       GEN_DO_SAMPLE: ${GEN_DO_SAMPLE}
+      GEN_PRESENCE_PENALTY: ${GEN_PRESENCE_PENALTY}
+      GEN_FREQUENCY_PENALTY: ${GEN_FREQUENCY_PENALTY}
+      GEN_MIN_P: ${GEN_MIN_P}
       GEN_SYSTEM_BASE_PROMPT: ${GEN_SYSTEM_BASE_PROMPT}
       GEN_USER_PROMPT: ${GEN_USER_PROMPT}
       HTTP_TIMEOUT_SEC: ${HTTP_TIMEOUT_SEC}
