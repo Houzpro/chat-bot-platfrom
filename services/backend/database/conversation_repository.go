@@ -47,12 +47,34 @@ func (r *ConversationRepository) GetConversationsByBotID(botID string) ([]Conver
 func (r *ConversationRepository) GetConversationsByBotIDAndUserID(botID string, userID string) ([]Conversation, error) {
 	var convs []Conversation
 	err := r.db.Conn.Where("bot_id = ? AND user_id = ?", botID, userID).
-		Order("updated_at DESC").
+		Order("updated_at DESC, id DESC").
 		Find(&convs).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get conversations: %w", err)
 	}
 	return convs, nil
+}
+
+// GetConversationsByBotIDAndUserIDPaginated returns a page of conversations plus total.
+// Tie-break by id DESC so equal updated_at timestamps don't shuffle across pages.
+func (r *ConversationRepository) GetConversationsByBotIDAndUserIDPaginated(botID string, userID string, offset, limit int) ([]Conversation, int64, error) {
+	var total int64
+	if err := r.db.Conn.Model(&Conversation{}).
+		Where("bot_id = ? AND user_id = ?", botID, userID).
+		Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count conversations: %w", err)
+	}
+
+	var convs []Conversation
+	err := r.db.Conn.Where("bot_id = ? AND user_id = ?", botID, userID).
+		Order("updated_at DESC, id DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&convs).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get conversations: %w", err)
+	}
+	return convs, total, nil
 }
 
 func (r *ConversationRepository) DeleteConversation(id string) error {
@@ -180,23 +202,79 @@ func (r *ConversationRepository) GetFeedbackStats(botID string) (*FeedbackStats,
 		Where("bot_id = ? AND role = ?", botID, "assistant").
 		Count(&stats.TotalMessages)
 
-	// Feedback counts
+	// Feedback counts — only for assistant messages belonging to this bot
 	r.db.Conn.Model(&MessageFeedback{}).
 		Joins("JOIN messages ON messages.id = message_feedbacks.message_id").
-		Where("messages.bot_id = ?", botID).
+		Where("messages.bot_id = ? AND messages.role = ?", botID, "assistant").
 		Count(&stats.TotalFeedbacks)
 
 	r.db.Conn.Model(&MessageFeedback{}).
 		Joins("JOIN messages ON messages.id = message_feedbacks.message_id").
-		Where("messages.bot_id = ? AND message_feedbacks.rating = 1", botID).
+		Where("messages.bot_id = ? AND messages.role = ? AND message_feedbacks.rating = 1", botID, "assistant").
 		Count(&stats.PositiveCount)
 
 	r.db.Conn.Model(&MessageFeedback{}).
 		Joins("JOIN messages ON messages.id = message_feedbacks.message_id").
-		Where("messages.bot_id = ? AND message_feedbacks.rating = -1", botID).
+		Where("messages.bot_id = ? AND messages.role = ? AND message_feedbacks.rating = -1", botID, "assistant").
 		Count(&stats.NegativeCount)
 
 	return &stats, nil
+}
+
+// BotAnalytics holds aggregated metrics for a bot.
+type BotAnalytics struct {
+	TotalConversations int64               `json:"total_conversations"`
+	TotalMessages      int64               `json:"total_messages"`
+	UserMessages       int64               `json:"user_messages"`
+	AssistantMessages  int64               `json:"assistant_messages"`
+	Feedback           FeedbackStats       `json:"feedback"`
+	MessagesPerDay     []DailyMessageCount `json:"messages_per_day"`
+}
+
+// DailyMessageCount is a single day bucket in the messages-per-day series.
+type DailyMessageCount struct {
+	Date  string `json:"date"`
+	Count int64  `json:"count"`
+}
+
+// GetBotAnalytics aggregates metrics for a bot: totals, feedback, daily messages (last 30 days).
+func (r *ConversationRepository) GetBotAnalytics(botID string) (*BotAnalytics, error) {
+	a := &BotAnalytics{}
+
+	r.db.Conn.Model(&Conversation{}).Where("bot_id = ?", botID).Count(&a.TotalConversations)
+	r.db.Conn.Model(&Message{}).Where("bot_id = ?", botID).Count(&a.TotalMessages)
+	r.db.Conn.Model(&Message{}).Where("bot_id = ? AND role = ?", botID, "user").Count(&a.UserMessages)
+	r.db.Conn.Model(&Message{}).Where("bot_id = ? AND role = ?", botID, "assistant").Count(&a.AssistantMessages)
+
+	stats, err := r.GetFeedbackStats(botID)
+	if err != nil {
+		return nil, err
+	}
+	a.Feedback = *stats
+
+	rows, err := r.db.Conn.Raw(`
+		SELECT TO_CHAR(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, COUNT(*) AS cnt
+		FROM messages
+		WHERE bot_id = ? AND role = 'user' AND created_at >= NOW() - INTERVAL '30 days'
+		GROUP BY day
+		ORDER BY day ASC
+	`, botID).Rows()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query messages_per_day: %w", err)
+	}
+	defer rows.Close()
+
+	series := []DailyMessageCount{}
+	for rows.Next() {
+		var d DailyMessageCount
+		if err := rows.Scan(&d.Date, &d.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan messages_per_day: %w", err)
+		}
+		series = append(series, d)
+	}
+	a.MessagesPerDay = series
+
+	return a, nil
 }
 
 // GetMessageByID returns a single message by its ID.

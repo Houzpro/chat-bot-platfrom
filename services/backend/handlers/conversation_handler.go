@@ -3,6 +3,7 @@ package handlers
 import (
 	"backend/auth"
 	"backend/database"
+	"backend/pagination"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -80,12 +81,13 @@ func (h *ConversationHandler) GetBotConversations(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not your bot"})
 	}
 
-	convs, err := h.convRepo.GetConversationsByBotIDAndUserID(botID, userID)
+	p := pagination.FromCtx(c)
+	convs, total, err := h.convRepo.GetConversationsByBotIDAndUserIDPaginated(botID, userID, p.Offset(), p.Limit)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get conversations"})
 	}
 
-	return c.JSON(convs)
+	return c.JSON(pagination.Build(convs, p, total))
 }
 
 // GetConversation returns a conversation with its messages

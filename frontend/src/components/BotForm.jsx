@@ -107,8 +107,11 @@ function BotForm({ token, bot, onSave, onCancel }) {
   // Load existing documents when editing a bot
   useEffect(() => {
     if (!bot) return
-    botsAPI.getDocuments(bot.id)
-      .then(data => setExistingDocs(data.documents || []))
+    // Documents are paginated; fetch a generous first page for this bot's
+    // edit form. If a user uploads >100 files, they'll need the upcoming
+    // paginated documents UI to manage them — handled in a follow-up task.
+    botsAPI.getDocuments(bot.id, { page: 1, limit: 100 })
+      .then(data => setExistingDocs(data.items || []))
       .catch(() => {})
   }, [bot])
 

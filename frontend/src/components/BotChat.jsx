@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react'
 import { ArrowLeft, MessageSquare, Send, StopCircle, Plus, Trash2, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { conversationsAPI, feedbackAPI } from '../api/client'
 import ThemeToggle from './ThemeToggle'
+import Pagination from './Pagination'
+import { usePagination } from '../hooks/usePagination'
 import './BotChat.css'
 
 const API_BASE = '/api/v1'
@@ -12,6 +14,8 @@ function BotChat({ bot, token, onBack }) {
   const [isLoading, setIsLoading] = useState(false)
   const [conversations, setConversations] = useState([])
   const [activeConversationId, setActiveConversationId] = useState(null)
+  const convPage = usePagination({ page: 1, limit: 20 })
+  const [convReloadNonce, setConvReloadNonce] = useState(0)
   const abortControllerRef = useRef(null)
   const messagesEndRef = useRef(null)
 
@@ -20,26 +24,36 @@ function BotChat({ bot, token, onBack }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Load conversations on mount
+  // Load conversations whenever the active page or bot changes.
   useEffect(() => {
-    loadConversations()
-  }, [bot.id])
-
-  const loadConversations = async () => {
-    try {
-      const convs = await conversationsAPI.getByBot(bot.id)
-      setConversations(convs)
-    } catch (err) {
-      console.error('Failed to load conversations:', err)
+    let cancelled = false
+    const load = async () => {
+      try {
+        const data = await conversationsAPI.getByBot(bot.id, {
+          page: convPage.page,
+          limit: convPage.limit,
+        })
+        if (cancelled) return
+        setConversations(data.items || [])
+        convPage.setMeta(data.pagination || null)
+      } catch (err) {
+        if (!cancelled) console.error('Failed to load conversations:', err)
+      }
     }
-  }
+    load()
+    return () => { cancelled = true }
+  }, [bot.id, convPage.page, convPage.limit, convReloadNonce])
+
+  const reloadConversations = () => setConvReloadNonce(n => n + 1)
 
   const createNewConversation = async () => {
     try {
       const conv = await conversationsAPI.create(bot.id)
-      setConversations(prev => [conv, ...prev])
       setActiveConversationId(conv.id)
       setMessages([])
+      // Snap to page 1 where the fresh conversation lives; refetch keeps total in sync.
+      if (convPage.page !== 1) convPage.setPage(1)
+      else reloadConversations()
     } catch (err) {
       console.error('Failed to create conversation:', err)
     }
@@ -69,11 +83,11 @@ function BotChat({ bot, token, onBack }) {
     e.stopPropagation()
     try {
       await conversationsAPI.delete(convId)
-      setConversations(prev => prev.filter(c => c.id !== convId))
       if (activeConversationId === convId) {
         setActiveConversationId(null)
         setMessages([])
       }
+      reloadConversations()
     } catch (err) {
       console.error('Failed to delete conversation:', err)
     }
@@ -112,7 +126,8 @@ function BotChat({ bot, token, onBack }) {
         const conv = await conversationsAPI.create(bot.id)
         convId = conv.id
         setActiveConversationId(conv.id)
-        setConversations(prev => [conv, ...prev])
+        if (convPage.page !== 1) convPage.setPage(1)
+        else reloadConversations()
       } catch (err) {
         console.error('Failed to create conversation:', err)
         return
@@ -237,8 +252,8 @@ function BotChat({ bot, token, onBack }) {
         return newMessages
       })
 
-      // Refresh conversations to update titles
-      loadConversations()
+      // Refresh conversations to update titles (first message becomes title)
+      reloadConversations()
 
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -313,6 +328,11 @@ function BotChat({ bot, token, onBack }) {
               <div className="sidebar-empty">No conversations yet</div>
             )}
           </div>
+          {convPage.meta && convPage.meta.total_pages > 1 && (
+            <div className="sidebar-pagination">
+              <Pagination meta={convPage.meta} onPageChange={convPage.setPage} />
+            </div>
+          )}
         </div>
 
         {/* Chat area */}

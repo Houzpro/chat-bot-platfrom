@@ -1,5 +1,19 @@
 const API_BASE = '/api/v1'
 
+// Build `?page=N&limit=M&search=...&...` for paginated/filtered endpoints.
+// Null/undefined/empty values are dropped so the backend applies its defaults
+// and pagination doesn't get polluted with `search=` when the user cleared
+// the box.
+const buildQuery = (obj = {}) => {
+  const params = new URLSearchParams()
+  for (const [k, v] of Object.entries(obj)) {
+    if (v == null || v === '') continue
+    params.set(k, v)
+  }
+  const s = params.toString()
+  return s ? `?${s}` : ''
+}
+
 // Token management
 export const getToken = () => localStorage.getItem('token')
 export const setToken = (token) => localStorage.setItem('token', token)
@@ -71,8 +85,9 @@ export const botsAPI = {
     })
   },
 
-  getMyBots: async () => {
-    return apiCall('/bots')
+  // Returns the pagination envelope: { items, pagination: { page, limit, total, total_pages, has_next, has_prev } }
+  getMyBots: async (params) => {
+    return apiCall(`/bots${buildQuery(params)}`)
   },
 
   getBot: async (id) => {
@@ -92,8 +107,9 @@ export const botsAPI = {
     })
   },
 
-  getDocuments: async (id) => {
-    return apiCall(`/bots/${id}/documents`)
+  // Returns the pagination envelope. Pass { page, limit } to control paging.
+  getDocuments: async (id, params) => {
+    return apiCall(`/bots/${id}/documents${buildQuery(params)}`)
   },
 
   deleteDocument: async (botId, docId) => {
@@ -156,8 +172,9 @@ export const conversationsAPI = {
     })
   },
 
-  getByBot: async (botId) => {
-    return apiCall(`/bots/${botId}/conversations`)
+  // Returns the pagination envelope.
+  getByBot: async (botId, params) => {
+    return apiCall(`/bots/${botId}/conversations${buildQuery(params)}`)
   },
 
   get: async (convId) => {
@@ -182,6 +199,13 @@ export const feedbackAPI = {
 
   getStats: async (botId) => {
     return apiCall(`/bots/${botId}/feedback/stats`)
+  },
+}
+
+// Analytics API
+export const analyticsAPI = {
+  getBotAnalytics: async (botId) => {
+    return apiCall(`/bots/${botId}/analytics`)
   },
 }
 

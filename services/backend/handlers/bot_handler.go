@@ -4,6 +4,7 @@ import (
 	"backend/auth"
 	"backend/config"
 	"backend/database"
+	"backend/pagination"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -128,7 +129,8 @@ func (h *BotHandler) CreateBot(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(createdBot)
 }
 
-// GetMyBots returns all bots owned by the current user
+// GetMyBots returns a page of bots owned by the current user.
+// Query params: ?page=1&limit=20 (defaults applied if absent/invalid).
 func (h *BotHandler) GetMyBots(c *fiber.Ctx) error {
 	userID, ok := auth.GetUserID(c)
 	if !ok {
@@ -137,16 +139,16 @@ func (h *BotHandler) GetMyBots(c *fiber.Ctx) error {
 		})
 	}
 
-	bots, err := h.botRepo.GetByOwnerID(userID)
+	p := pagination.FromCtx(c)
+	search := strings.TrimSpace(c.Query("search"))
+	bots, total, err := h.botRepo.GetByOwnerIDPaginated(userID, search, p.Offset(), p.Limit)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to get bots",
 		})
 	}
 
-	return c.JSON(fiber.Map{
-		"bots": bots,
-	})
+	return c.JSON(pagination.Build(bots, p, total))
 }
 
 // GetBot returns a specific bot (owner can see full details, others see public info)
@@ -312,14 +314,13 @@ func (h *BotHandler) GetBotDocuments(c *fiber.Ctx) error {
 		})
 	}
 
-	documents, err := h.botRepo.GetDocuments(botID)
+	p := pagination.FromCtx(c)
+	documents, total, err := h.botRepo.GetDocumentsPaginated(botID, p.Offset(), p.Limit)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to get documents",
 		})
 	}
 
-	return c.JSON(fiber.Map{
-		"documents": documents,
-	})
+	return c.JSON(pagination.Build(documents, p, total))
 }

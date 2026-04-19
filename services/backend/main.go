@@ -88,6 +88,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(userRepo, jwtService)
 	botHandler := handlers.NewBotHandler(botRepo, cfg)
 	convHandler := handlers.NewConversationHandler(convRepo, botRepo)
+	analyticsHandler := handlers.NewAnalyticsHandler(convRepo, botRepo)
 
 	// Create Fiber app with optimizations for high load
 	app := fiber.New(fiber.Config{
@@ -175,6 +176,9 @@ func main() {
 	// Message feedback
 	protected.Post("/messages/:message_id/feedback", convHandler.SubmitFeedback)
 	protected.Get("/bots/:id/feedback/stats", convHandler.GetFeedbackStats)
+
+	// Analytics
+	protected.Get("/bots/:id/analytics", analyticsHandler.GetBotAnalytics)
 
 	// Graceful shutdown setup
 	quit := make(chan os.Signal, 1)

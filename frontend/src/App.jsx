@@ -19,6 +19,8 @@ const parseRoute = () => {
   if (pub) return { name: 'public-chat', botId: pub[1] }
   const chat = path.match(/^\/chat\/([^/]+)\/?$/)
   if (chat) return { name: 'app-chat', botId: chat[1] }
+  const analytics = path.match(/^\/analytics\/([^/]+)\/?$/)
+  if (analytics) return { name: 'app-analytics', botId: analytics[1] }
   return { name: 'app' }
 }
 
@@ -135,6 +137,7 @@ function App() {
   // and opens a bot via navigate('/chat/:id'), which updates both URL and
   // route state so F5 and Back behave the same way.
   const activeBotId = route.name === 'app-chat' ? route.botId : null
+  const analyticsBotId = route.name === 'app-analytics' ? route.botId : null
 
   return (
     <Dashboard
@@ -142,6 +145,7 @@ function App() {
       user={user}
       onLogout={handleLogout}
       activeBotId={activeBotId}
+      analyticsBotId={analyticsBotId}
       navigate={navigate}
     />
   )
