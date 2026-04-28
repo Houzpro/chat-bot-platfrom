@@ -144,22 +144,6 @@ message_feedback (id SERIAL PK, message_id INT FK, user_id INT FK nullable, rati
 
 ---
 
-### 2E. Экспорт чата
-
-**Зависит от**: 1B
-
-**Backend**:
-- `GET /api/v1/conversations/:conv_id/export?format=txt` (и `format=pdf`)
-- TXT: `strings.Builder` + `Content-Disposition: attachment`
-- PDF: библиотека `jung-kurt/gofpdf`, добавить в `go.mod`
-
-**Frontend**:
-- `BotChat.jsx`: Кнопка Download в шапке чата → `window.open(exportURL)`
-
-**Файлы**: `conversation_handler.go`, `BotChat.jsx`, `go.mod`
-
----
-
 ## Фаза 3: Платформенные фичи
 
 ### ~~3A. Сброс пароля / верификация email~~ — ОТЛОЖЕНО

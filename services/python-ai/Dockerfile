@@ -15,16 +15,9 @@ RUN pip install --no-cache-dir --upgrade pip \
 # NLTK данные при сборке
 RUN python -c "import nltk; nltk.download('punkt_tab', quiet=True)"
 
-# Скачиваем embedding и reranker модели при сборке образа,
-# чтобы контейнер работал полностью автономно без интернета
-ARG EMBEDDING_MODEL=intfloat/multilingual-e5-base
-ARG RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
-
-RUN python -c "\
-from sentence_transformers import SentenceTransformer, CrossEncoder; \
-SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/app/models/embedding'); \
-CrossEncoder('${RERANKER_MODEL}', max_length=512); \
-print('Models downloaded successfully')"
+# Embedding/reranker модели НЕ скачиваются в билде — они монтируются как volume
+# из ./models/embedding (cache_folder) и ./models/hf-cache (HF default cache).
+# При первом запуске reranker подтянется в hf-cache и больше качаться не будет.
 
 COPY app ./app
 

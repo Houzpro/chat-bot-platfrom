@@ -374,6 +374,19 @@ func (h *Handler) RAGChat(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	// Context window is owned by the bot's saved settings — the client
+	// cannot override it. If the bot has 0 configured, fall back to the
+	// global default from env.
+	if h.botRepo != nil {
+		if bot, err := h.botRepo.GetByID(req.ClientID); err == nil {
+			if bot.ContextWindow > 0 {
+				req.ContextWindow = bot.ContextWindow
+			} else {
+				req.ContextWindow = h.cfg.RAG.ContextWindowSize
+			}
+		}
+	}
+
 	// Set defaults and validate parameters
 	req.SetDefaults(h.cfg.RAG.MaxResults, h.cfg.Generation)
 
@@ -488,6 +501,8 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 		req.SystemPrompt = bot.SystemPrompt
 		if bot.ContextWindow > 0 {
 			req.ContextWindow = bot.ContextWindow
+		} else {
+			req.ContextWindow = h.cfg.RAG.ContextWindowSize
 		}
 	}
 
@@ -707,6 +722,34 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 			}
 		}
 
+		contextWindow := h.cfg.RAG.ContextWindowSize
+		if req.ContextWindow > 0 {
+			contextWindow = req.ContextWindow
+		}
+
+		// Load conversation history BEFORE persisting the current user message,
+		// so the freshly-saved row isn't double-counted (it's appended below as
+		// the "current user query" entry).
+		var historyMessages []map[string]string
+		if req.ConversationID != "" && h.convRepo != nil && contextWindow > 0 {
+			recent, err := h.convRepo.GetRecentMessages(req.ConversationID, contextWindow)
+			if err == nil {
+				for _, m := range recent {
+					historyMessages = append(historyMessages, map[string]string{
+						"role":    m.Role,
+						"content": m.Content,
+					})
+				}
+			}
+		} else if len(req.History) > 0 && contextWindow > 0 {
+			// Guest chat or stateless caller: trust the client-supplied tail.
+			tail := req.History
+			if len(tail) > contextWindow {
+				tail = tail[len(tail)-contextWindow:]
+			}
+			historyMessages = append(historyMessages, tail...)
+		}
+
 		// Save user message (both public and authenticated chat)
 		if h.convRepo != nil {
 			userMsg := &database.Message{
@@ -742,24 +785,8 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 		// Build system prompt with context
 		systemPromptWithContext := req.SystemPrompt + "\n\nContext:\n" + contextStr
 
-		// Build messages array with conversation history
-		var chatMessages []map[string]string
-
-		contextWindow := h.cfg.RAG.ContextWindowSize
-		if req.ContextWindow > 0 {
-			contextWindow = req.ContextWindow
-		}
-
-		// Use client-provided history for conversation context
-		if len(req.History) > 0 {
-			limit := contextWindow
-			if len(req.History) > limit {
-				req.History = req.History[len(req.History)-limit:]
-			}
-			chatMessages = append(chatMessages, req.History...)
-		}
-
-		// Always add the current user query as the last message
+		// Build messages array: history (already trimmed) + current query.
+		chatMessages := append([]map[string]string{}, historyMessages...)
 		chatMessages = append(chatMessages, map[string]string{
 			"role":    "user",
 			"content": req.Query,

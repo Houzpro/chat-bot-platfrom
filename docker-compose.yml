@@ -80,7 +80,13 @@ services:
       dockerfile: Dockerfile
     container_name: chatbot-ai-service
     restart: unless-stopped
+    volumes:
+      # Кеш sentence-transformers (cache_folder=EMBEDDING_CACHE_FOLDER → /app/models/embedding)
+      - ./models/embedding:/app/models/embedding
+      # Дефолтный HF-кеш для reranker (CrossEncoder без cache_folder пишет сюда)
+      - ./models/hf-cache:/root/.cache/huggingface
     environment:
+      HF_TOKEN: ${HF_TOKEN}
       LLAMA_SERVER_URL: http://llama-cpp:8080
       GGUF_MODEL_PATH: ${GGUF_MODEL_PATH}
       GEN_MAX_NEW_TOKENS: ${GEN_MAX_NEW_TOKENS}
