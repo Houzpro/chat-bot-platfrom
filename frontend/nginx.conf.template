@@ -13,9 +13,19 @@ server {
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
-    # Proxy API requests to backend
-    location /api/ {
-        proxy_pass http://backend:${BACKEND_PORT}/api/;
+    # Re-resolve `backend` on every request via Docker's embedded DNS at
+    # 127.0.0.11 — without this, nginx caches the IP from startup and breaks
+    # whenever the backend container is recreated and gets a new IP.
+    # Using a variable in proxy_pass forces nginx to defer DNS lookup to runtime.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $backend_upstream "backend:${BACKEND_PORT}";
+
+    # Proxy API requests to backend. The regex location captures the path
+    # after /api/ as $1 so we can rebuild the URL with the runtime-resolved
+    # upstream — required because nginx silently drops the URI rewrite from
+    # `proxy_pass http://var/path` when the URL contains a variable.
+    location ~ ^/api/(.*)$ {
+        proxy_pass http://$backend_upstream/api/$1$is_args$args;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

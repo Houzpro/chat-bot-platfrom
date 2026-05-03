@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,6 +57,42 @@ func main() {
 	userRepo := database.NewUserRepository(db)
 	botRepo := database.NewBotRepository(db)
 	convRepo := database.NewConversationRepository(db)
+	collabRepo := database.NewCollaboratorRepository(db)
+
+	// Bootstrap a system admin account on first start. Two modes:
+	//   1) ADMIN_EMAIL only      → promote an existing registered user.
+	//   2) ADMIN_EMAIL+PASSWORD  → create the user if missing (system account),
+	//                               then promote. Useful for fresh installs so
+	//                               the operator can log in immediately without
+	//                               needing to register through the UI first.
+	// Defaults (admin@local / change-me-admin) come from .env.example so a
+	// `docker compose up` install lands you with a working admin login —
+	// change them before deploying anywhere serious.
+	if adminEmail := strings.TrimSpace(os.Getenv("ADMIN_EMAIL")); adminEmail != "" {
+		adminEmail = strings.ToLower(adminEmail)
+		adminPassword := os.Getenv("ADMIN_PASSWORD")
+		user, err := userRepo.GetByEmail(adminEmail)
+		if err != nil {
+			if adminPassword == "" {
+				log.Printf("⚠️  ADMIN_EMAIL=%s not found and no ADMIN_PASSWORD set — skipping bootstrap", adminEmail)
+			} else {
+				created, cerr := userRepo.Create(adminEmail, adminPassword, "Administrator")
+				if cerr != nil {
+					log.Printf("⚠️  Failed to create admin %s: %v", adminEmail, cerr)
+				} else if serr := userRepo.SetRole(created.ID, "admin"); serr != nil {
+					log.Printf("⚠️  Created admin %s but failed to set role: %v", adminEmail, serr)
+				} else {
+					log.Printf("✓ Created admin account %s", adminEmail)
+				}
+			}
+		} else if user.Role != "admin" {
+			if serr := userRepo.SetRole(user.ID, "admin"); serr != nil {
+				log.Printf("⚠️  Failed to promote %s to admin: %v", adminEmail, serr)
+			} else {
+				log.Printf("✓ Promoted %s to admin", adminEmail)
+			}
+		}
+	}
 
 	// Initialize JWT service
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -84,11 +121,12 @@ func main() {
 
 	// Initialize client and handlers
 	serviceClient := clients.NewClient(httpClient)
-	h := handlers.NewHandler(cfg, serviceClient, botRepo, convRepo)
+	h := handlers.NewHandler(cfg, serviceClient, botRepo, convRepo, collabRepo)
 	authHandler := handlers.NewAuthHandler(userRepo, jwtService)
-	botHandler := handlers.NewBotHandler(botRepo, cfg)
-	convHandler := handlers.NewConversationHandler(convRepo, botRepo)
+	botHandler := handlers.NewBotHandler(botRepo, collabRepo, userRepo, cfg)
+	convHandler := handlers.NewConversationHandler(convRepo, botRepo, collabRepo)
 	analyticsHandler := handlers.NewAnalyticsHandler(convRepo, botRepo)
+	adminHandler := handlers.NewAdminHandler(userRepo, botRepo, convRepo)
 
 	// Create Fiber app with optimizations for high load
 	app := fiber.New(fiber.Config{
@@ -160,6 +198,12 @@ func main() {
 	protected.Delete("/bots/:id", h.DeleteBot)
 	protected.Get("/bots/:id/documents", botHandler.GetBotDocuments)
 
+	// Collaborators (owner manages, anyone can have a role)
+	protected.Get("/bots/:id/collaborators", botHandler.ListCollaborators)
+	protected.Post("/bots/:id/collaborators", botHandler.AddCollaborator)
+	protected.Put("/bots/:id/collaborators/:user_id", botHandler.UpdateCollaborator)
+	protected.Delete("/bots/:id/collaborators/:user_id", botHandler.RemoveCollaborator)
+
 	// Document management (owner only)
 	protected.Post("/bots/:id/documents/upload", h.UploadDocumentForBot)
 	protected.Delete("/bots/:id/documents/:doc_id", h.DeleteBotDocument)
@@ -179,6 +223,15 @@ func main() {
 
 	// Analytics
 	protected.Get("/bots/:id/analytics", analyticsHandler.GetBotAnalytics)
+
+	// Admin (requires role='admin' on top of standard auth)
+	admin := protected.Group("/admin", auth.AdminMiddleware(userRepo))
+	admin.Get("/stats", adminHandler.GetStats)
+	admin.Get("/users", adminHandler.ListUsers)
+	admin.Put("/users/:id/role", adminHandler.SetUserRole)
+	admin.Delete("/users/:id", adminHandler.DeleteUser)
+	admin.Get("/bots", adminHandler.ListBots)
+	admin.Delete("/bots/:id", adminHandler.DeleteBot)
 
 	// Graceful shutdown setup
 	quit := make(chan os.Signal, 1)

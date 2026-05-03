@@ -209,6 +209,42 @@ export const analyticsAPI = {
   },
 }
 
+// Collaborators API — bot sharing. Owner-only management; collaborators see
+// shared bots in their bot list (with role flag) but cannot manage other
+// collaborators themselves.
+export const collaboratorsAPI = {
+  list: async (botId) => apiCall(`/bots/${botId}/collaborators`),
+  add: async (botId, email, role) =>
+    apiCall(`/bots/${botId}/collaborators`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    }),
+  updateRole: async (botId, userId, role) =>
+    apiCall(`/bots/${botId}/collaborators/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }),
+  remove: async (botId, userId) =>
+    apiCall(`/bots/${botId}/collaborators/${userId}`, { method: 'DELETE' }),
+}
+
+// Admin API — restricted to users with role='admin'. The middleware returns
+// 403 for everyone else, which the UI treats as "hide the admin panel link."
+export const adminAPI = {
+  getStats: async () => apiCall('/admin/stats'),
+  listUsers: async (params) => apiCall(`/admin/users${buildQuery(params)}`),
+  setUserRole: async (userId, role) =>
+    apiCall(`/admin/users/${userId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }),
+  deleteUser: async (userId) =>
+    apiCall(`/admin/users/${userId}`, { method: 'DELETE' }),
+  listBots: async (params) => apiCall(`/admin/bots${buildQuery(params)}`),
+  deleteBot: async (botId) =>
+    apiCall(`/admin/bots/${botId}`, { method: 'DELETE' }),
+}
+
 // Public Feedback API (no auth required)
 export const publicFeedbackAPI = {
   submit: async (messageId, rating) => {

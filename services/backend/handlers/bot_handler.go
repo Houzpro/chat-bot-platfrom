@@ -12,14 +12,18 @@ import (
 )
 
 type BotHandler struct {
-	botRepo *database.BotRepository
-	cfg     *config.Config
+	botRepo    *database.BotRepository
+	collabRepo *database.CollaboratorRepository
+	userRepo   *database.UserRepository
+	cfg        *config.Config
 }
 
-func NewBotHandler(botRepo *database.BotRepository, cfg *config.Config) *BotHandler {
+func NewBotHandler(botRepo *database.BotRepository, collabRepo *database.CollaboratorRepository, userRepo *database.UserRepository, cfg *config.Config) *BotHandler {
 	return &BotHandler{
-		botRepo: botRepo,
-		cfg:     cfg,
+		botRepo:    botRepo,
+		collabRepo: collabRepo,
+		userRepo:   userRepo,
+		cfg:        cfg,
 	}
 }
 
@@ -129,8 +133,11 @@ func (h *BotHandler) CreateBot(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(createdBot)
 }
 
-// GetMyBots returns a page of bots owned by the current user.
-// Query params: ?page=1&limit=20 (defaults applied if absent/invalid).
+// GetMyBots returns a page of bots accessible to the current user — both
+// owned bots and bots shared with them as a collaborator. Each item carries
+// a `role` field ("owner"/"editor"/"viewer") so the frontend can decide which
+// management actions to expose.
+// Query params: ?page=1&limit=20&search=...
 func (h *BotHandler) GetMyBots(c *fiber.Ctx) error {
 	userID, ok := auth.GetUserID(c)
 	if !ok {
@@ -141,7 +148,7 @@ func (h *BotHandler) GetMyBots(c *fiber.Ctx) error {
 
 	p := pagination.FromCtx(c)
 	search := strings.TrimSpace(c.Query("search"))
-	bots, total, err := h.botRepo.GetByOwnerIDPaginated(userID, search, p.Offset(), p.Limit)
+	bots, total, err := h.botRepo.GetAccessibleBotsPaginated(userID, search, p.Offset(), p.Limit)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to get bots",
@@ -301,14 +308,11 @@ func (h *BotHandler) GetBotDocuments(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check ownership
-	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "bot not found",
-		})
-	}
-	if !isOwner {
+	// Owner OR any collaborator (viewer/editor) can list documents — the chat
+	// UI shows the document list to viewers so they understand what knowledge
+	// the bot has. Editors and owners are the only ones allowed to upload/delete
+	// (enforced in handlers.UploadDocumentForBot / DeleteBotDocument).
+	if !h.canAccessBot(botID, userID, "viewer") {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": "you don't have permission to view this bot's documents",
 		})
@@ -323,4 +327,175 @@ func (h *BotHandler) GetBotDocuments(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(pagination.Build(documents, p, total))
+}
+
+// canAccessBot returns true if userID is the owner of botID, or has a
+// collaborator role at least as privileged as `requiredRole`.
+// requiredRole can be "viewer" (anyone with access) or "editor" (editor/owner).
+func (h *BotHandler) canAccessBot(botID, userID, requiredRole string) bool {
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err == nil && isOwner {
+		return true
+	}
+	if h.collabRepo == nil {
+		return false
+	}
+	role, err := h.collabRepo.GetRole(botID, userID)
+	if err != nil || role == "" {
+		return false
+	}
+	if requiredRole == "editor" {
+		return role == "editor"
+	}
+	return role == "editor" || role == "viewer"
+}
+
+// AddCollaboratorRequest is the JSON body for inviting a user.
+type AddCollaboratorRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+// ListCollaborators returns all collaborators for a bot. Only the owner can
+// see this list.
+// GET /api/v1/bots/:id/collaborators
+func (h *BotHandler) ListCollaborators(c *fiber.Ctx) error {
+	userID, ok := auth.GetUserID(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	botID := c.Params("id")
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
+	}
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err != nil || !isOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only the owner can manage collaborators"})
+	}
+	rows, err := h.collabRepo.ListByBot(botID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list collaborators"})
+	}
+	return c.JSON(rows)
+}
+
+// AddCollaborator invites a user (by email) to collaborate on a bot. Only
+// the owner can invite. Self-invitation is rejected so the dashboard never
+// double-counts the bot.
+// POST /api/v1/bots/:id/collaborators
+func (h *BotHandler) AddCollaborator(c *fiber.Ctx) error {
+	userID, ok := auth.GetUserID(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	botID := c.Params("id")
+	if botID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
+	}
+
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err != nil || !isOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only the owner can add collaborators"})
+	}
+
+	req := new(AddCollaboratorRequest)
+	if err := c.BodyParser(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	if req.Email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
+	if req.Role != "editor" && req.Role != "viewer" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "role must be 'editor' or 'viewer'"})
+	}
+
+	target, err := h.userRepo.GetByEmail(req.Email)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user with this email not found"})
+	}
+	if target.ID == userID {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "you already own this bot"})
+	}
+
+	collab, err := h.collabRepo.Add(botID, target.ID, req.Role)
+	if err != nil {
+		if err.Error() == "already a collaborator" {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "already a collaborator"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to add collaborator"})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"id":         collab.ID,
+		"bot_id":     collab.BotID,
+		"user_id":    collab.UserID,
+		"role":       collab.Role,
+		"email":      target.Email,
+		"name":       target.Name,
+		"created_at": collab.CreatedAt,
+	})
+}
+
+// UpdateCollaboratorRequest body for PUT.
+type UpdateCollaboratorRequest struct {
+	Role string `json:"role"`
+}
+
+// UpdateCollaborator changes a collaborator's role.
+// PUT /api/v1/bots/:id/collaborators/:user_id
+func (h *BotHandler) UpdateCollaborator(c *fiber.Ctx) error {
+	userID, ok := auth.GetUserID(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	botID := c.Params("id")
+	targetID := c.Params("user_id")
+	if botID == "" || targetID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id and user_id are required"})
+	}
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err != nil || !isOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only the owner can manage collaborators"})
+	}
+
+	req := new(UpdateCollaboratorRequest)
+	if err := c.BodyParser(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.Role != "editor" && req.Role != "viewer" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "role must be 'editor' or 'viewer'"})
+	}
+	if err := h.collabRepo.UpdateRole(botID, targetID, req.Role); err != nil {
+		if err.Error() == "collaborator not found" {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "collaborator not found"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update collaborator"})
+	}
+	return c.JSON(fiber.Map{"success": true})
+}
+
+// RemoveCollaborator deletes a collaborator entry.
+// DELETE /api/v1/bots/:id/collaborators/:user_id
+func (h *BotHandler) RemoveCollaborator(c *fiber.Ctx) error {
+	userID, ok := auth.GetUserID(c)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	botID := c.Params("id")
+	targetID := c.Params("user_id")
+	if botID == "" || targetID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id and user_id are required"})
+	}
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err != nil || !isOwner {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only the owner can manage collaborators"})
+	}
+	if err := h.collabRepo.Remove(botID, targetID); err != nil {
+		if err.Error() == "collaborator not found" {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "collaborator not found"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to remove collaborator"})
+	}
+	return c.JSON(fiber.Map{"success": true})
 }

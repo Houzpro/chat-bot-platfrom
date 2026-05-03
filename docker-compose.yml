@@ -210,6 +210,8 @@ services:
       CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS}
       CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS}
       LOG_LEVEL: ${LOG_LEVEL}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     ports:
       - "${BACKEND_PORT}:8080"
     depends_on:

@@ -73,3 +73,73 @@ func (r *UserRepository) GetByID(id string) (*User, error) {
 func (r *UserRepository) VerifyPassword(user *User, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 }
+
+// GetRole returns the user's role ("user" or "admin"). Used by AdminMiddleware
+// without loading the rest of the user record on every admin request.
+func (r *UserRepository) GetRole(userID string) (string, error) {
+	var role string
+	err := r.db.Conn.Model(&User{}).Where("id = ?", userID).Pluck("role", &role).Error
+	if err != nil {
+		return "", err
+	}
+	if role == "" {
+		role = "user"
+	}
+	return role, nil
+}
+
+// ListUsersPaginated returns a page of users (admin-only).
+func (r *UserRepository) ListUsersPaginated(search string, offset, limit int) ([]User, int64, error) {
+	q := r.db.Conn.Model(&User{})
+	if search != "" {
+		pattern := "%" + search + "%"
+		q = q.Where("email ILIKE ? OR name ILIKE ?", pattern, pattern)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var users []User
+	if err := q.Order("created_at DESC, id DESC").Offset(offset).Limit(limit).Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
+
+// SetRole updates a user's role. Admins use this to promote/demote.
+func (r *UserRepository) SetRole(userID, role string) error {
+	if role != "user" && role != "admin" {
+		return fmt.Errorf("invalid role: %s", role)
+	}
+	result := r.db.Conn.Model(&User{}).Where("id = ?", userID).Update("role", role)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+// DeleteUser permanently removes a user. Cascades through FK ON DELETE rules
+// (bots, conversations, etc.) — admins should be aware destructive actions
+// take ALL the user's data with them.
+func (r *UserRepository) DeleteUser(userID string) error {
+	result := r.db.Conn.Where("id = ?", userID).Delete(&User{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+// CountUsers returns the total number of registered users (for admin stats).
+func (r *UserRepository) CountUsers() (int64, error) {
+	var n int64
+	err := r.db.Conn.Model(&User{}).Count(&n).Error
+	return n, err
+}

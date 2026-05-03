@@ -13,6 +13,7 @@ type User struct {
 	Email        string    `gorm:"unique;not null;size:255" json:"email"`
 	PasswordHash string    `gorm:"not null;size:255" json:"-"` // Never expose in JSON
 	Name         string    `gorm:"size:255" json:"name"`
+	Role         string    `gorm:"size:20;default:'user';not null" json:"role"`
 	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 
@@ -149,6 +150,29 @@ type MessageFeedback struct {
 func (f *MessageFeedback) BeforeCreate(tx *gorm.DB) error {
 	if f.ID == "" {
 		f.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// BotCollaborator represents a user who has shared access to someone else's bot.
+// Role is either "viewer" (chat only) or "editor" (chat + manage documents/settings).
+// Owners are NOT stored here — they're identified via bots.owner_id.
+type BotCollaborator struct {
+	ID        string    `gorm:"type:uuid;primaryKey" json:"id"`
+	BotID     string    `gorm:"type:uuid;not null;uniqueIndex:idx_collab_bot_user" json:"bot_id"`
+	UserID    string    `gorm:"type:uuid;not null;uniqueIndex:idx_collab_bot_user" json:"user_id"`
+	Role      string    `gorm:"size:20;not null" json:"role"` // "editor" | "viewer"
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+
+	// Relationships
+	Bot  Bot  `gorm:"foreignKey:BotID" json:"-"`
+	User User `gorm:"foreignKey:UserID" json:"user,omitempty"`
+}
+
+// BeforeCreate hook to generate UUID for BotCollaborator
+func (bc *BotCollaborator) BeforeCreate(tx *gorm.DB) error {
+	if bc.ID == "" {
+		bc.ID = uuid.New().String()
 	}
 	return nil
 }

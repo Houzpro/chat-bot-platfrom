@@ -9,15 +9,32 @@ import (
 )
 
 type ConversationHandler struct {
-	convRepo *database.ConversationRepository
-	botRepo  *database.BotRepository
+	convRepo   *database.ConversationRepository
+	botRepo    *database.BotRepository
+	collabRepo *database.CollaboratorRepository
 }
 
-func NewConversationHandler(convRepo *database.ConversationRepository, botRepo *database.BotRepository) *ConversationHandler {
+func NewConversationHandler(convRepo *database.ConversationRepository, botRepo *database.BotRepository, collabRepo *database.CollaboratorRepository) *ConversationHandler {
 	return &ConversationHandler{
-		convRepo: convRepo,
-		botRepo:  botRepo,
+		convRepo:   convRepo,
+		botRepo:    botRepo,
+		collabRepo: collabRepo,
 	}
+}
+
+// canAccessBot mirrors handlers.Handler.hasBotAccess — duplicated here so
+// conversation_handler doesn't need an import cycle through Handler. Returns
+// true for the owner or any collaborator (viewer/editor).
+func (h *ConversationHandler) canAccessBot(botID, userID string) bool {
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err == nil && isOwner {
+		return true
+	}
+	if h.collabRepo == nil {
+		return false
+	}
+	role, err := h.collabRepo.GetRole(botID, userID)
+	return err == nil && role != ""
 }
 
 // CreateConversation creates a new conversation for a bot
@@ -39,8 +56,7 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
 	}
 
-	isOwner, err := h.botRepo.CheckOwnership(body.BotID, userID)
-	if err != nil || !isOwner {
+	if !h.canAccessBot(body.BotID, userID) {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not your bot"})
 	}
 
@@ -55,7 +71,7 @@ func (h *ConversationHandler) CreateConversation(c *fiber.Ctx) error {
 		Title:  title,
 	}
 
-	conv, err = h.convRepo.CreateConversation(conv)
+	conv, err := h.convRepo.CreateConversation(conv)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create conversation"})
 	}
@@ -76,8 +92,7 @@ func (h *ConversationHandler) GetBotConversations(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
 	}
 
-	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
-	if err != nil || !isOwner {
+	if !h.canAccessBot(botID, userID) {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not your bot"})
 	}
 
@@ -182,8 +197,7 @@ func (h *ConversationHandler) SubmitFeedback(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not your conversation"})
 		}
 	} else if msg.BotID != nil {
-		isOwner, err := h.botRepo.CheckOwnership(*msg.BotID, userID)
-		if err != nil || !isOwner {
+		if !h.canAccessBot(*msg.BotID, userID) {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not your bot"})
 		}
 	}

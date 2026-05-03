@@ -19,10 +19,34 @@ import (
 )
 
 type Handler struct {
-	cfg      *config.Config
-	client   *clients.Client
-	botRepo  *database.BotRepository
-	convRepo *database.ConversationRepository
+	cfg        *config.Config
+	client     *clients.Client
+	botRepo    *database.BotRepository
+	convRepo   *database.ConversationRepository
+	collabRepo *database.CollaboratorRepository
+}
+
+// hasBotAccess returns true if userID may interact with the bot at the
+// requested level. "viewer" → owner OR any collaborator (chat-only access).
+// "editor" → owner OR collaborator with role="editor" (upload/manage docs).
+// botRepo / collabRepo are read-only here so this stays cheap to call from
+// every authenticated chat/upload request.
+func (h *Handler) hasBotAccess(botID, userID, requiredRole string) bool {
+	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
+	if err == nil && isOwner {
+		return true
+	}
+	if h.collabRepo == nil {
+		return false
+	}
+	role, err := h.collabRepo.GetRole(botID, userID)
+	if err != nil || role == "" {
+		return false
+	}
+	if requiredRole == "editor" {
+		return role == "editor"
+	}
+	return role == "editor" || role == "viewer"
 }
 
 // clampContext limits context size to avoid exceeding model window.
@@ -97,12 +121,13 @@ func normalizeBotID(botID string) string {
 	return strings.TrimPrefix(botID, "bot_")
 }
 
-func NewHandler(cfg *config.Config, client *clients.Client, botRepo *database.BotRepository, convRepo *database.ConversationRepository) *Handler {
+func NewHandler(cfg *config.Config, client *clients.Client, botRepo *database.BotRepository, convRepo *database.ConversationRepository, collabRepo *database.CollaboratorRepository) *Handler {
 	return &Handler{
-		cfg:      cfg,
-		client:   client,
-		botRepo:  botRepo,
-		convRepo: convRepo,
+		cfg:        cfg,
+		client:     client,
+		botRepo:    botRepo,
+		convRepo:   convRepo,
+		collabRepo: collabRepo,
 	}
 }
 
@@ -151,9 +176,8 @@ func (h *Handler) UploadDocumentForBot(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
 	}
 
-	// Check ownership
-	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
-	if err != nil || !isOwner {
+	// Owner OR editor collaborator may upload — viewers cannot.
+	if !h.hasBotAccess(botID, userID, "editor") {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "you don't have permission to upload to this bot"})
 	}
 
@@ -274,9 +298,8 @@ func (h *Handler) DeleteBotDocument(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid document id"})
 	}
 
-	// Check ownership
-	isOwner, err := h.botRepo.CheckOwnership(botID, userID)
-	if err != nil || !isOwner {
+	// Owner OR editor collaborator may delete documents.
+	if !h.hasBotAccess(botID, userID, "editor") {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "you don't have permission to delete this document"})
 	}
 

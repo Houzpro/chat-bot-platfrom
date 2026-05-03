@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Bot, LogOut, Trash2, Edit, ExternalLink, Upload, BarChart2, Search, X } from 'lucide-react'
+import { Plus, Bot, LogOut, Trash2, Edit, ExternalLink, Upload, BarChart2, Search, X, ShieldCheck } from 'lucide-react'
 import BotChat from './BotChat'
 import BotForm from './BotForm'
 import Analytics from './Analytics'
@@ -304,6 +304,12 @@ function Dashboard({ token, user, onLogout, activeBotId = null, analyticsBotId =
           </div>
           <div className="header-right">
             <ThemeToggle />
+            {user.role === 'admin' && (
+              <button onClick={() => navigate('/admin')} className="logout-btn" title="Admin panel">
+                <ShieldCheck size={18} />
+                Admin
+              </button>
+            )}
             <button onClick={handleCreateBot} className="create-bot-btn">
               <Plus size={18} />
               Create Bot
@@ -369,6 +375,19 @@ function Dashboard({ token, user, onLogout, activeBotId = null, analyticsBotId =
                     <Bot size={24} />
                   </div>
                   <div className="bot-status">
+                    {bot.role && bot.role !== 'owner' && (
+                      <span
+                        className="status-badge"
+                        style={{
+                          marginRight: 6,
+                          background: 'var(--accent-muted)',
+                          color: 'var(--accent)',
+                          border: '1px solid var(--accent-border)',
+                        }}
+                      >
+                        Shared · {bot.role}
+                      </span>
+                    )}
                     <span className={`status-badge ${bot.is_active ? 'active' : 'inactive'}`}>
                       {bot.is_active ? 'Active' : 'Inactive'}
                     </span>
@@ -396,48 +415,60 @@ function Dashboard({ token, user, onLogout, activeBotId = null, analyticsBotId =
                   >
                     Open Chat
                   </button>
-                  <button
-                    onClick={() => handleUploadClick(bot.id)}
-                    className="action-btn"
-                    title={`Upload document (max ${formatBytes(maxFileSize)})`}
-                  >
-                    <Upload size={16} />
-                  </button>
-                  <input
-                    ref={el => { fileInputsRef.current[bot.id] = el }}
-                    type="file"
-                    accept={allowedExtensions.join(',')}
-                    onChange={(e) => handleUploadFile(bot.id, e)}
-                    style={{ display: 'none' }}
-                  />
-                  <button
-                    onClick={() => handleOpenAnalytics(bot)}
-                    className="action-btn"
-                    title="Analytics"
-                  >
-                    <BarChart2 size={16} />
-                  </button>
-                  <button
-                    onClick={() => copyPublicUrl(bot.id)}
-                    className="action-btn"
-                    title="Copy public URL"
-                  >
-                    <ExternalLink size={16} />
-                  </button>
-                  <button
-                    onClick={() => handleEditBot(bot)}
-                    className="action-btn"
-                    title="Edit bot"
-                  >
-                    <Edit size={16} />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteBot(bot.id)}
-                    className="action-btn danger"
-                    title="Delete bot"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  {/* Editors and owners may upload; viewers cannot. role is
+                      'owner' for owned bots and 'editor'/'viewer' for shared. */}
+                  {(bot.role === 'owner' || bot.role === 'editor' || !bot.role) && (
+                    <>
+                      <button
+                        onClick={() => handleUploadClick(bot.id)}
+                        className="action-btn"
+                        title={`Upload document (max ${formatBytes(maxFileSize)})`}
+                      >
+                        <Upload size={16} />
+                      </button>
+                      <input
+                        ref={el => { fileInputsRef.current[bot.id] = el }}
+                        type="file"
+                        accept={allowedExtensions.join(',')}
+                        onChange={(e) => handleUploadFile(bot.id, e)}
+                        style={{ display: 'none' }}
+                      />
+                    </>
+                  )}
+                  {/* Analytics, public URL, edit, and delete are owner-only.
+                      Backend enforces this with 403; we just hide the buttons. */}
+                  {(bot.role === 'owner' || !bot.role) && (
+                    <>
+                      <button
+                        onClick={() => handleOpenAnalytics(bot)}
+                        className="action-btn"
+                        title="Analytics"
+                      >
+                        <BarChart2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => copyPublicUrl(bot.id)}
+                        className="action-btn"
+                        title="Copy public URL"
+                      >
+                        <ExternalLink size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleEditBot(bot)}
+                        className="action-btn"
+                        title="Edit bot"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteBot(bot.id)}
+                        className="action-btn danger"
+                        title="Delete bot"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </>
+                  )}
                 </div>
                 {uploadStatus[bot.id] && (
                   <div className={`bot-upload-status ${uploadStatus[bot.id].type}`}>

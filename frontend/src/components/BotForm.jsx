@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowLeft, Save, Upload, X, FileText, Trash2 } from 'lucide-react'
-import { botsAPI } from '../api/client'
+import { ArrowLeft, Save, Upload, X, FileText, Trash2, UserPlus, Users } from 'lucide-react'
+import { botsAPI, collaboratorsAPI } from '../api/client'
 import ThemeToggle from './ThemeToggle'
 import './BotForm.css'
 
@@ -103,6 +103,80 @@ function BotForm({ token, bot, onSave, onCancel }) {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
+
+  // Collaborators state — only meaningful when editing an existing bot
+  // (the API call needs bot.id). Loaded lazily on mount when `bot` is set.
+  const [collaborators, setCollaborators] = useState([])
+  const [collabEmail, setCollabEmail] = useState('')
+  const [collabRole, setCollabRole] = useState('viewer')
+  const [collabError, setCollabError] = useState('')
+  const [collabBusy, setCollabBusy] = useState(false)
+
+  useEffect(() => {
+    if (!bot) return
+    // The API returns `null` for an empty collaborator list (Go encodes a nil
+    // slice that way). Coerce to [] so .map / .length downstream don't crash.
+    collaboratorsAPI.list(bot.id)
+      .then(list => setCollaborators(Array.isArray(list) ? list : []))
+      .catch(() => setCollaborators([]))
+  }, [bot])
+
+  const reloadCollaborators = async () => {
+    if (!bot) return
+    try {
+      const list = await collaboratorsAPI.list(bot.id)
+      setCollaborators(Array.isArray(list) ? list : [])
+    } catch (err) {
+      console.error('Failed to reload collaborators:', err)
+    }
+  }
+
+  const handleAddCollaborator = async (e) => {
+    if (e && e.preventDefault) e.preventDefault()
+    setCollabError('')
+    if (!collabEmail.trim()) return
+    setCollabBusy(true)
+    try {
+      await collaboratorsAPI.add(bot.id, collabEmail.trim(), collabRole)
+      setCollabEmail('')
+      await reloadCollaborators()
+    } catch (err) {
+      setCollabError(err.message || 'Failed to add collaborator')
+    } finally {
+      setCollabBusy(false)
+    }
+  }
+
+  // Enter in the email field invites the collaborator without submitting the
+  // outer bot-form. Nested <form> tags are flattened by the browser, so we
+  // can't put Collaborators in their own <form> — handle the keypress manually.
+  const handleCollabEmailKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleAddCollaborator()
+    }
+  }
+
+  const handleRemoveCollaborator = async (userId, email) => {
+    if (!confirm(`Remove ${email} from this bot?`)) return
+    setCollabError('')
+    try {
+      await collaboratorsAPI.remove(bot.id, userId)
+      await reloadCollaborators()
+    } catch (err) {
+      setCollabError(err.message || 'Failed to remove collaborator')
+    }
+  }
+
+  const handleChangeCollabRole = async (userId, role) => {
+    setCollabError('')
+    try {
+      await collaboratorsAPI.updateRole(bot.id, userId, role)
+      await reloadCollaborators()
+    } catch (err) {
+      setCollabError(err.message || 'Failed to update role')
+    }
+  }
 
   // Load existing documents when editing a bot
   useEffect(() => {
@@ -521,6 +595,77 @@ function BotForm({ token, bot, onSave, onCancel }) {
         </div>
 
         {error && <div className="error-message">{error}</div>}
+
+        {bot && (
+          <div className="form-section">
+            <h2 className="section-title-with-icon">
+              <Users size={20} />
+              <span>Collaborators</span>
+            </h2>
+            <p className="section-description">
+              Share this bot with other users. Viewers can chat; editors can also upload and manage documents. Only the owner can change bot settings or invite others.
+            </p>
+
+            <div className="collab-add-row">
+              <input
+                type="email"
+                value={collabEmail}
+                onChange={(e) => setCollabEmail(e.target.value)}
+                onKeyDown={handleCollabEmailKeyDown}
+                placeholder="user@example.com"
+                disabled={collabBusy}
+              />
+              <select
+                value={collabRole}
+                onChange={(e) => setCollabRole(e.target.value)}
+                disabled={collabBusy}
+              >
+                <option value="viewer">Viewer</option>
+                <option value="editor">Editor</option>
+              </select>
+              <button
+                type="button"
+                className="invite-btn"
+                onClick={handleAddCollaborator}
+                disabled={collabBusy || !collabEmail.trim()}
+              >
+                <UserPlus size={16} />
+                <span>Invite</span>
+              </button>
+            </div>
+
+            {collabError && <div className="error-message">{collabError}</div>}
+
+            {collaborators.length === 0 ? (
+              <p className="collab-empty">No collaborators yet</p>
+            ) : (
+              <div className="collab-list">
+                {collaborators.map(c => (
+                  <div key={c.id} className="collab-item">
+                    <Users size={18} className="collab-icon" />
+                    <span className="collab-name">{c.name || c.email}</span>
+                    <span className="collab-email">{c.email}</span>
+                    <select
+                      value={c.role}
+                      onChange={(e) => handleChangeCollabRole(c.user_id, e.target.value)}
+                    >
+                      <option value="viewer">Viewer</option>
+                      <option value="editor">Editor</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCollaborator(c.user_id, c.email)}
+                      className="remove-collab-btn"
+                      title="Remove collaborator"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="form-actions">
           <button type="button" onClick={onCancel} className="cancel-btn" disabled={isLoading}>

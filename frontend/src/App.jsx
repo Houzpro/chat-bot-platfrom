@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import PublicChat from './components/PublicChat'
+import AdminPanel from './components/AdminPanel'
 import { useTheme } from './hooks/useTheme'
 import './App.css'
 
@@ -21,6 +22,7 @@ const parseRoute = () => {
   if (chat) return { name: 'app-chat', botId: chat[1] }
   const analytics = path.match(/^\/analytics\/([^/]+)\/?$/)
   if (analytics) return { name: 'app-analytics', botId: analytics[1] }
+  if (path === '/admin' || path === '/admin/') return { name: 'app-admin' }
   return { name: 'app' }
 }
 
@@ -138,6 +140,16 @@ function App() {
   // route state so F5 and Back behave the same way.
   const activeBotId = route.name === 'app-chat' ? route.botId : null
   const analyticsBotId = route.name === 'app-analytics' ? route.botId : null
+
+  // /admin is only meaningful for admins. Non-admins hitting the URL get
+  // bounced to the dashboard — the backend would 403 every request anyway.
+  if (route.name === 'app-admin') {
+    if (user.role !== 'admin') {
+      navigate('/', { replace: true })
+      return null
+    }
+    return <AdminPanel user={user} onBack={() => navigate('/')} />
+  }
 
   return (
     <Dashboard

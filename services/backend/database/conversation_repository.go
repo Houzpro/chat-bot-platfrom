@@ -277,6 +277,20 @@ func (r *ConversationRepository) GetBotAnalytics(botID string) (*BotAnalytics, e
 	return a, nil
 }
 
+// CountAllConversations returns total conversations across all bots (admin).
+func (r *ConversationRepository) CountAllConversations() (int64, error) {
+	var n int64
+	err := r.db.Conn.Model(&Conversation{}).Count(&n).Error
+	return n, err
+}
+
+// CountAllMessages returns total messages across all bots (admin).
+func (r *ConversationRepository) CountAllMessages() (int64, error) {
+	var n int64
+	err := r.db.Conn.Model(&Message{}).Count(&n).Error
+	return n, err
+}
+
 // GetMessageByID returns a single message by its ID.
 func (r *ConversationRepository) GetMessageByID(id string) (*Message, error) {
 	var msg Message

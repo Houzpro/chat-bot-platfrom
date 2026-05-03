@@ -113,6 +113,87 @@ func (r *BotRepository) GetByOwnerIDPaginated(ownerID, search string, offset, li
 	return bots, total, nil
 }
 
+// GetAccessibleBotsPaginated returns owned + shared bots for a user as a single
+// page. Owned rows include `role = "owner"`; shared rows carry the collaborator
+// role ("editor"/"viewer"). Sort matches GetByOwnerIDPaginated so the existing
+// dashboard layout keeps working.
+type AccessibleBot struct {
+	Bot
+	Role string `json:"role"` // "owner" | "editor" | "viewer"
+}
+
+func (r *BotRepository) GetAccessibleBotsPaginated(userID, search string, offset, limit int) ([]AccessibleBot, int64, error) {
+	// Build the same search predicate twice (owner side + shared side). Using
+	// UNION ALL keeps each branch's own filter and still sorts by the merged
+	// set's created_at + id tie-breaker so pagination is stable across pages.
+	args := []any{userID}
+	ownerWhere := "owner_id = ?"
+	sharedWhere := "1=1"
+	if s := strings.TrimSpace(search); s != "" {
+		pattern := "%" + escapeLike(s) + "%"
+		ownerWhere = `owner_id = ? AND (name ILIKE ? ESCAPE '\' OR description ILIKE ? ESCAPE '\')`
+		args = []any{userID, pattern, pattern}
+		sharedWhere = `(name ILIKE ? ESCAPE '\' OR description ILIKE ? ESCAPE '\')`
+	}
+
+	// Count = owned matches + collaborator matches.
+	var total int64
+	countSQL := `
+		SELECT (
+			SELECT COUNT(*) FROM bots WHERE ` + ownerWhere + `
+		) + (
+			SELECT COUNT(*) FROM bots b
+			JOIN bot_collaborators bc ON bc.bot_id = b.id
+			WHERE bc.user_id = ?` + func() string {
+		if strings.TrimSpace(search) != "" {
+			return ` AND ` + sharedWhere
+		}
+		return ""
+	}() + `
+		) AS total
+	`
+	countArgs := append([]any{}, args...)
+	countArgs = append(countArgs, userID)
+	if strings.TrimSpace(search) != "" {
+		pattern := "%" + escapeLike(strings.TrimSpace(search)) + "%"
+		countArgs = append(countArgs, pattern, pattern)
+	}
+	if err := r.db.Conn.Raw(countSQL, countArgs...).Scan(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count accessible bots: %w", err)
+	}
+
+	listSQL := `
+		SELECT * FROM (
+			SELECT b.*, 'owner' AS role FROM bots b WHERE b.` + ownerWhere + `
+			UNION ALL
+			SELECT b.*, bc.role AS role
+			FROM bots b
+			JOIN bot_collaborators bc ON bc.bot_id = b.id
+			WHERE bc.user_id = ?` + func() string {
+		if strings.TrimSpace(search) != "" {
+			return ` AND ` + sharedWhere
+		}
+		return ""
+	}() + `
+		) AS combined
+		ORDER BY is_active DESC, created_at DESC, id DESC
+		LIMIT ? OFFSET ?
+	`
+	listArgs := append([]any{}, args...)
+	listArgs = append(listArgs, userID)
+	if strings.TrimSpace(search) != "" {
+		pattern := "%" + escapeLike(strings.TrimSpace(search)) + "%"
+		listArgs = append(listArgs, pattern, pattern)
+	}
+	listArgs = append(listArgs, limit, offset)
+
+	var bots []AccessibleBot
+	if err := r.db.Conn.Raw(listSQL, listArgs...).Scan(&bots).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to query accessible bots: %w", err)
+	}
+	return bots, total, nil
+}
+
 // Update updates an existing bot
 func (r *BotRepository) Update(bot *Bot) error {
 	result := r.db.Conn.Model(bot).
@@ -218,6 +299,72 @@ func (r *BotRepository) DeleteDocument(docID string, botID string) error {
 func (r *BotRepository) DeleteDocumentsByBotID(botID string) error {
 	if err := r.db.Conn.Where("bot_id = ?", botID).Delete(&BotDocument{}).Error; err != nil {
 		return fmt.Errorf("failed to delete documents: %w", err)
+	}
+	return nil
+}
+
+// AdminBotRow is a bot row enriched with the owner's email/name. Used by the
+// admin panel so the operator can see who owns each bot at a glance.
+type AdminBotRow struct {
+	ID         string `json:"id"`
+	OwnerID    string `json:"owner_id"`
+	Name       string `json:"name"`
+	IsActive   bool   `json:"is_active"`
+	CreatedAt  string `json:"created_at"`
+	OwnerEmail string `json:"owner_email"`
+	OwnerName  string `json:"owner_name"`
+}
+
+// ListAllBotsPaginated returns a page of all bots in the system (admin-only).
+func (r *BotRepository) ListAllBotsPaginated(search string, offset, limit int) ([]AdminBotRow, int64, error) {
+	args := []any{}
+	whereSQL := ""
+	if s := strings.TrimSpace(search); s != "" {
+		pattern := "%" + escapeLike(s) + "%"
+		whereSQL = `WHERE b.name ILIKE ? ESCAPE '\' OR b.description ILIKE ? ESCAPE '\' OR u.email ILIKE ? ESCAPE '\'`
+		args = []any{pattern, pattern, pattern}
+	}
+
+	var total int64
+	countSQL := "SELECT COUNT(*) FROM bots b JOIN users u ON u.id = b.owner_id " + whereSQL
+	if err := r.db.Conn.Raw(countSQL, args...).Scan(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count bots: %w", err)
+	}
+
+	listSQL := `
+		SELECT b.id, b.owner_id, b.name, b.is_active,
+		       to_char(b.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+		       u.email AS owner_email, u.name AS owner_name
+		FROM bots b
+		JOIN users u ON u.id = b.owner_id
+		` + whereSQL + `
+		ORDER BY b.created_at DESC, b.id DESC
+		LIMIT ? OFFSET ?
+	`
+	listArgs := append([]any{}, args...)
+	listArgs = append(listArgs, limit, offset)
+	var rows []AdminBotRow
+	if err := r.db.Conn.Raw(listSQL, listArgs...).Scan(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to list bots: %w", err)
+	}
+	return rows, total, nil
+}
+
+// CountAllBots returns the total number of bots (admin stats).
+func (r *BotRepository) CountAllBots() (int64, error) {
+	var n int64
+	err := r.db.Conn.Model(&Bot{}).Count(&n).Error
+	return n, err
+}
+
+// AdminDeleteBot deletes a bot regardless of owner. Used by admins.
+func (r *BotRepository) AdminDeleteBot(botID string) error {
+	result := r.db.Conn.Where("id = ?", botID).Delete(&Bot{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete bot: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("bot not found")
 	}
 	return nil
 }

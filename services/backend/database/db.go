@@ -81,12 +81,39 @@ func (db *DB) AutoMigrate() error {
 		}
 	}
 
-	return db.Conn.AutoMigrate(
+	if err := db.Conn.AutoMigrate(
 		&User{},
 		&Bot{},
 		&BotDocument{},
 		&Conversation{},
 		&Message{},
 		&MessageFeedback{},
-	)
+		&BotCollaborator{},
+	); err != nil {
+		return err
+	}
+
+	// Backfill role for existing users that pre-date the role column.
+	// AutoMigrate adds the column with default 'user', but rows inserted before
+	// the column existed get NULL on some Postgres versions — normalize to 'user'.
+	db.Conn.Exec(`UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''`)
+
+	// Enforce role check constraints at the DB level. GORM tags don't emit
+	// CHECK constraints reliably across drivers, so we add them explicitly.
+	db.Conn.Exec(`
+		DO $$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check') THEN
+				ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin'));
+			END IF;
+		END $$;
+	`)
+	db.Conn.Exec(`
+		DO $$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bot_collaborators_role_check') THEN
+				ALTER TABLE bot_collaborators ADD CONSTRAINT bot_collaborators_role_check CHECK (role IN ('editor', 'viewer'));
+			END IF;
+		END $$;
+	`)
+
+	return nil
 }
