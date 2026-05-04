@@ -206,27 +206,6 @@ bot_collaborators (id SERIAL PK, bot_id UUID FK, user_id INT FK, role VARCHAR CH
 
 **Файлы**: Все Go файлы с `log.Printf`, `main.go`, `service_client.go`, `main.py`, `model_service_gguf.py`, `rag_service.py`
 
----
-
-### 4B. Swagger / OpenAPI
-
-**Go**: Добавить `swaggo/swag` + `swaggo/fiber-swagger`. Аннотации на все хендлеры. `swag init` → `docs/`. Роут `/swagger/*`.
-
-**Python**: FastAPI уже генерирует — дополнить Pydantic модели описаниями полей, добавить `response_model` и `tags`.
-
-**Файлы**: Все handler файлы в `services/backend/handlers/`, `routes.py`, `schemas.py`, `go.mod`
-
----
-
-### 4C. Тесты
-
-**Go**: Новые файлы `*_test.go` в `services/backend/handlers/`, `services/backend/database/`. Использовать `testing` + `httptest`. Тесты: auth, bot CRUD, ownership, chat.
-
-**Python**: Новые файлы `services/python-ai/tests/test_routes.py`, `test_rag_service.py`. Использовать `pytest` + `httpx`. Мок llama.cpp.
-
-**Frontend** (опционально): `vitest` + `@testing-library/react`.
-
----
 
 ## Фаза 5: Продвинутые фичи
 

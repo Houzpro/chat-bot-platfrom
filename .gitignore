@@ -38,9 +38,9 @@ frontend/dist/
 # blobs и snapshots huggingface
 services/python-ai/models/*/blobs/
 services/python-ai/models/*/snapshots/
-
 *claude
 
 # Local environment file with secrets — use .env.example as template
 .env
 !.env.example
+PLAN.md
