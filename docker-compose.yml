@@ -25,7 +25,10 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./services/backend/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      # Schema is owned by GORM AutoMigrate (see database/db.go) — no need
+      # to seed via /docker-entrypoint-initdb.d. The previous bind-mount
+      # also caused a "Is a directory" psql error when schema.sql was
+      # missing on the host, since Docker created an empty dir in its place.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chatbot"]
       interval: 10s
@@ -212,11 +215,57 @@ services:
       LOG_LEVEL: ${LOG_LEVEL}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Model registry — backend scans this dir at boot for *.gguf files,
+      # and llama-cpp child containers bind-mount it back at /models.
+      MODELS_DIR: /models
+      LLAMA_SERVER_URL: http://llama-cpp:8080
+      GGUF_MODEL_FILE: ${GGUF_MODEL_FILE:-Qwen3.5-4B-Q4_K_M.gguf}
+      # ABSOLUTE path on the docker HOST where ./models lives. Required
+      # because the backend (running inside its container) talks to the
+      # daemon over the host socket, and Docker rejects relative bind-mount
+      # paths. We default to ${PWD}/models — that's the compose project
+      # directory at "up" time, which is exactly the host path of ./models.
+      # Override in .env when you run backend outside compose.
+      LLAMA_MODELS_HOST_DIR: ${LLAMA_MODELS_HOST_DIR:-${PWD}/models}
+      LLAMA_DOCKER_NETWORK: ${LLAMA_DOCKER_NETWORK:-chat-bot-platfrom_default}
+      # LLAMA_IMAGE is intentionally NOT defaulted here — when unset, the
+      # container manager picks ghcr.io/ggml-org/llama.cpp:server (CPU) or
+      # :server-cuda (GPU) based on LLAMA_USE_GPU. Override only if you
+      # want to pin a specific build.
+      LLAMA_IMAGE: ${LLAMA_IMAGE:-}
+      LLAMA_PORT_MIN: ${LLAMA_PORT_MIN:-8100}
+      LLAMA_PORT_MAX: ${LLAMA_PORT_MAX:-8199}
+      LLAMA_N_CTX: ${N_CTX:-8192}
+      LLAMA_N_THREADS: ${N_THREADS:-6}
+      LLAMA_N_GPU_LAYERS: ${N_GPU_LAYERS:-0}
+      LLAMA_PARALLEL: ${LLAMA_PARALLEL:-1}
+      # Set LLAMA_USE_GPU=true to spawn dynamic containers with NVIDIA GPU
+      # access + the CUDA llama.cpp image. Combine with the docker-compose.gpu.yml
+      # override so the static llama-cpp service also gets GPU.
+      LLAMA_USE_GPU: ${LLAMA_USE_GPU:-false}
+      # KV cache quantization for dynamic containers — same defaults as the
+      # GPU compose override. Empty string keeps llama.cpp's default (f16),
+      # which is what CPU mode wants.
+      LLAMA_CACHE_TYPE_K: ${LLAMA_CACHE_TYPE_K:-}
+      LLAMA_CACHE_TYPE_V: ${LLAMA_CACHE_TYPE_V:-}
+    volumes:
+      # Docker socket — required for the container manager to spawn
+      # per-model llama.cpp containers. Docker Desktop on Windows/WSL2
+      # exposes the socket at /var/run/docker.sock inside containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Read-only view of the models directory so the seed scan works.
+      # Child containers get their own bind-mount via the daemon, not
+      # through this share.
+      - ./models:/models:ro
     ports:
       - "${BACKEND_PORT}:8080"
     depends_on:
+      # Wait for pg_isready, not just "container started" — otherwise the
+      # backend boots while Postgres is still initializing and crashes on
+      # the first GORM connect. The other services come up fast and don't
+      # need the same treatment.
       postgres:
-        condition: service_started
+        condition: service_healthy
       document-parser:
         condition: service_started
       vector-db:

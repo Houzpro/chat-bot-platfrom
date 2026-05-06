@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
@@ -8,8 +8,11 @@ COPY go.mod go.sum ./
 # Копируем все исходники (включая packages)
 COPY . .
 
-# Обновляем зависимости и собираем
-RUN go mod tidy && go mod download && go mod verify
+# Собираем. Не запускаем `go mod tidy` в Dockerfile — это может изменить
+# go.mod/go.sum от того, что зафиксировано в репозитории, и привести к
+# непредсказуемым билдам. Доверяем go.sum, который зафиксирован при
+# разработке. `go mod download` достаточно для получения зависимостей.
+RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o backend main.go
 
 # Финальный образ

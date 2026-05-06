@@ -66,7 +66,8 @@ def ask(request: AskRequest):
                 top_k=request.top_k if request.top_k is not None else settings.generation_top_k,
                 do_sample=request.do_sample if request.do_sample is not None else settings.generation_do_sample,
                 behavior_instruction=request.behavior_instruction,
-                system_prompt=request.system_prompt
+                system_prompt=request.system_prompt,
+                llm_endpoint=request.llm_endpoint,
             ):
                 yield f"data: {json.dumps({'type': 'token', 'token': chunk})}\n\n"
 
@@ -99,6 +100,7 @@ def generate_endpoint(
     do_sample: bool | None = Body(None),
     behavior_instruction: str | None = Body(None),
     system_prompt: str | None = Body(None),
+    llm_endpoint: str | None = Body(None),
 ):
     """Синхронная генерация ответа без RAG (для gateway)."""
     try:
@@ -111,6 +113,7 @@ def generate_endpoint(
             do_sample=do_sample,
             behavior_instruction=behavior_instruction,
             system_prompt=system_prompt,
+            llm_endpoint=llm_endpoint,
         )
         return {"text": text}
     except Exception as e:

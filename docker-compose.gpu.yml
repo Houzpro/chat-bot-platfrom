@@ -33,3 +33,12 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+  # Tell the container manager to spawn dynamic per-model containers in
+  # GPU mode too. Without this override the manager defaults to CPU even
+  # when the static llama-cpp container is on GPU.
+  backend:
+    environment:
+      LLAMA_USE_GPU: "true"
+      LLAMA_CACHE_TYPE_K: q8_0
+      LLAMA_CACHE_TYPE_V: q8_0

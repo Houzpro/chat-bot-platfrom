@@ -75,6 +75,19 @@ class ModelServiceGGUF:
             "stop": self._stop_sequences,
         }
 
+    def _resolve_server_url(self, llm_endpoint: Optional[str]) -> str:
+        """Pick the llama.cpp base URL for this request.
+
+        The platform default (settings.llama_server_url) serves base models.
+        When a bot is bound to a finetuned model, the backend forwards that
+        model's container URL via llm_endpoint, and we send the request there
+        instead. Returning the same string both times keeps callers simple —
+        they don't need to know which mode they're in.
+        """
+        if llm_endpoint:
+            return llm_endpoint.rstrip("/")
+        return LLAMA_SERVER_URL.rstrip("/")
+
     def generate_response(
         self,
         messages: List[Dict[str, str]],
@@ -85,10 +98,12 @@ class ModelServiceGGUF:
         do_sample: Optional[bool] = None,
         behavior_instruction: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        llm_endpoint: Optional[str] = None,
     ) -> str:
         """Синхронная генерация ответа через llama.cpp server."""
         chat_messages = self._build_messages(messages, behavior_instruction, system_prompt)
         params = self._build_params(max_new_tokens, temperature, top_p, top_k, do_sample)
+        server_url = self._resolve_server_url(llm_endpoint)
 
         payload = {
             "messages": chat_messages,
@@ -97,7 +112,7 @@ class ModelServiceGGUF:
         }
 
         resp = httpx.post(
-            f"{LLAMA_SERVER_URL}/v1/chat/completions",
+            f"{server_url}/v1/chat/completions",
             json=payload,
             timeout=300,
         )
@@ -115,14 +130,18 @@ class ModelServiceGGUF:
         do_sample: Optional[bool] = None,
         behavior_instruction: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        llm_endpoint: Optional[str] = None,
     ) -> Iterator[str]:
         """Потоковая генерация ответа через llama.cpp server (SSE)."""
         chat_messages = self._build_messages(messages, behavior_instruction, system_prompt)
         params = self._build_params(max_new_tokens, temperature, top_p, top_k, do_sample)
+        server_url = self._resolve_server_url(llm_endpoint)
 
         if system_prompt:
             print(f"[AI Service] System prompt length: {len(system_prompt)} chars")
         print(f"[AI Service] User query: {messages[0].get('content', '') if messages else 'N/A'}")
+        if llm_endpoint:
+            print(f"[AI Service] Using override LLM endpoint: {server_url}")
 
         payload = {
             "messages": chat_messages,
@@ -133,7 +152,7 @@ class ModelServiceGGUF:
         started = False
         with httpx.stream(
             "POST",
-            f"{LLAMA_SERVER_URL}/v1/chat/completions",
+            f"{server_url}/v1/chat/completions",
             json=payload,
             timeout=300,
         ) as response:

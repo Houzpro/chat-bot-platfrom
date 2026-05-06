@@ -24,6 +24,7 @@ type Handler struct {
 	botRepo    *database.BotRepository
 	convRepo   *database.ConversationRepository
 	collabRepo *database.CollaboratorRepository
+	modelRepo  *database.ModelRepository
 }
 
 // hasBotAccess returns true if userID may interact with the bot at the
@@ -121,13 +122,14 @@ func normalizeBotID(botID string) string {
 	return strings.TrimPrefix(botID, "bot_")
 }
 
-func NewHandler(cfg *config.Config, client *clients.Client, botRepo *database.BotRepository, convRepo *database.ConversationRepository, collabRepo *database.CollaboratorRepository) *Handler {
+func NewHandler(cfg *config.Config, client *clients.Client, botRepo *database.BotRepository, convRepo *database.ConversationRepository, collabRepo *database.CollaboratorRepository, modelRepo *database.ModelRepository) *Handler {
 	return &Handler{
 		cfg:        cfg,
 		client:     client,
 		botRepo:    botRepo,
 		convRepo:   convRepo,
 		collabRepo: collabRepo,
+		modelRepo:  modelRepo,
 	}
 }
 
@@ -724,6 +726,46 @@ func (h *Handler) PublicRAGChat(c *fiber.Ctx) error {
 	return h.streamRAGResponse(c, req, docs, contextStr)
 }
 
+// resolveLLMEndpoint inspects the bot's model_id (if any) and returns the
+// llama.cpp endpoint URL the AI service should target for this request.
+// Returns "" when generation should go to the AI service's own
+// LLAMA_SERVER_URL (the platform-default container).
+//
+// Discriminator: we route by container_name, not by model.Type.
+//   • model bound to "chatbot-llama-cpp" → platform default → return ""
+//   • model with its own running container  → return its endpoint_url
+//   • model not running                     → error (so the user sees a
+//     clear "deploy first" message instead of a silently-wrong answer
+//     from the default Qwen).
+//
+// This handles the Phase-2 case where a *base* model (e.g. Nemotron) is
+// deployed as its own standalone container alongside the default Qwen —
+// previously we shorted on type=='base' and fell back to default, which
+// is what made the bug visible.
+func (h *Handler) resolveLLMEndpoint(botID string) (string, error) {
+	if h.botRepo == nil || h.modelRepo == nil {
+		return "", nil
+	}
+	bot, err := h.botRepo.GetByID(botID)
+	if err != nil || bot.ModelID == nil || *bot.ModelID == "" {
+		return "", nil
+	}
+	model, err := h.modelRepo.GetByID(*bot.ModelID)
+	if err != nil {
+		// Bot points at a now-deleted model — fall back to platform default.
+		return "", nil
+	}
+	// Platform-default container — AI service already targets it via env.
+	if model.ContainerName == "chatbot-llama-cpp" {
+		return "", nil
+	}
+	// Anything else must be running with a populated endpoint.
+	if model.Status != "running" || model.EndpointURL == "" {
+		return "", fmt.Errorf("model '%s' is not deployed (status=%s)", model.Name, model.Status)
+	}
+	return model.EndpointURL, nil
+}
+
 // streamRAGResponse handles SSE streaming for RAG responses
 func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, docs []string, contextStr string) error {
 	c.Set("Content-Type", "text/event-stream")
@@ -815,6 +857,18 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 			"content": req.Query,
 		})
 
+		// Resolve which llama.cpp container should serve this request. For
+		// bots bound to a finetuned model we point the AI service at that
+		// model's container; otherwise we leave the field empty and the AI
+		// service uses its default LLAMA_SERVER_URL.
+		llmEndpoint, endpointErr := h.resolveLLMEndpoint(req.ClientID)
+		if endpointErr != nil {
+			errJSON, _ := json.Marshal(map[string]string{"error": endpointErr.Error()})
+			fmt.Fprintf(w, "data: %s\n\n", errJSON)
+			w.Flush()
+			return
+		}
+
 		genReq := models.GenerateRequest{
 			Messages:     chatMessages,
 			MaxNewTokens: req.MaxNewTokens,
@@ -823,6 +877,7 @@ func (h *Handler) streamRAGResponse(c *fiber.Ctx, req models.RAGChatRequest, doc
 			TopK:         req.TopK,
 			DoSample:     req.DoSample,
 			SystemPrompt: systemPromptWithContext,
+			LLMEndpoint:  llmEndpoint,
 		}
 
 		resp, err := h.client.StreamGeneration(h.cfg.Services.AIURL, genReq)

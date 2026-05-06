@@ -3,6 +3,7 @@ import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import PublicChat from './components/PublicChat'
 import AdminPanel from './components/AdminPanel'
+import ModelsPage from './components/ModelsPage'
 import { useTheme } from './hooks/useTheme'
 import './App.css'
 
@@ -23,6 +24,7 @@ const parseRoute = () => {
   const analytics = path.match(/^\/analytics\/([^/]+)\/?$/)
   if (analytics) return { name: 'app-analytics', botId: analytics[1] }
   if (path === '/admin' || path === '/admin/') return { name: 'app-admin' }
+  if (path === '/models' || path === '/models/') return { name: 'app-models' }
   return { name: 'app' }
 }
 
@@ -149,6 +151,12 @@ function App() {
       return null
     }
     return <AdminPanel user={user} onBack={() => navigate('/')} />
+  }
+
+  // /models — registry of base + finetuned models with deploy/stop controls.
+  // Open to any authenticated user; backend filters by ownership for finetuned.
+  if (route.name === 'app-models') {
+    return <ModelsPage onBack={() => navigate('/')} />
   }
 
   return (

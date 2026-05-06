@@ -43,6 +43,11 @@ type GenerateRequest struct {
 	TopK         int                 `json:"top_k"`
 	DoSample     bool                `json:"do_sample"`
 	SystemPrompt string              `json:"system_prompt"`
+	// LLMEndpoint optionally overrides the llama.cpp server URL on the
+	// AI service for this single request. Empty string = use the AI
+	// service's default (LLAMA_SERVER_URL). Set when the bot is bound to
+	// a finetuned model with its own container.
+	LLMEndpoint string `json:"llm_endpoint,omitempty"`
 }
 
 // GenerateResponse represents the response from text generation

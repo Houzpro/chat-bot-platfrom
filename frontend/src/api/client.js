@@ -209,6 +209,17 @@ export const analyticsAPI = {
   },
 }
 
+// Models registry API. The backend already filters out other users' finetuned
+// models, so the dropdown can render whatever this returns without an extra
+// access check on the client side.
+export const modelsAPI = {
+  list: async () => apiCall('/models'),
+  get: async (id) => apiCall(`/models/${id}`),
+  deploy: async (id) => apiCall(`/models/${id}/deploy`, { method: 'POST' }),
+  stop: async (id) => apiCall(`/models/${id}/stop`, { method: 'POST' }),
+  delete: async (id) => apiCall(`/models/${id}`, { method: 'DELETE' }),
+}
+
 // Collaborators API — bot sharing. Owner-only management; collaborators see
 // shared bots in their bot list (with role flag) but cannot manage other
 // collaborators themselves.

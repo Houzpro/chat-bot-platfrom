@@ -6,6 +6,7 @@ import (
 	"backend/config"
 	"backend/database"
 	"backend/handlers"
+	"backend/services"
 	"context"
 	"log"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +60,78 @@ func main() {
 	botRepo := database.NewBotRepository(db)
 	convRepo := database.NewConversationRepository(db)
 	collabRepo := database.NewCollaboratorRepository(db)
+	modelRepo := database.NewModelRepository(db)
+
+	// Seed base models from /models/*.gguf so the BotForm dropdown has
+	// something to show on first boot. Idempotent: files already registered
+	// are reconciled to match GGUF_MODEL_FILE rather than duplicated.
+	// MODELS_DIR defaults to /models (where docker-compose mounts the host
+	// ./models volume), but operators can override it for local dev.
+	modelsDir := os.Getenv("MODELS_DIR")
+	if modelsDir == "" {
+		modelsDir = "/models"
+	}
+	defaultLlamaEndpoint := os.Getenv("LLAMA_SERVER_URL")
+	if defaultLlamaEndpoint == "" {
+		defaultLlamaEndpoint = "http://llama-cpp:8080"
+	}
+	activeGGUF := os.Getenv("GGUF_MODEL_FILE")
+	if err := database.SeedBaseModels(modelRepo, modelsDir, defaultLlamaEndpoint, activeGGUF); err != nil {
+		log.Printf("⚠️  SeedBaseModels: %v", err)
+	}
+
+	// Container manager — wires the Docker daemon into the model registry.
+	// Optional: if the docker socket isn't mounted (e.g. local `go run`
+	// outside compose), we log and continue with `containerMgr == nil`,
+	// which causes deploy/stop endpoints to return 503 instead of crashing.
+	llamaImage := os.Getenv("LLAMA_IMAGE")
+	llamaNetwork := os.Getenv("LLAMA_DOCKER_NETWORK")
+	llamaModelsHostDir := os.Getenv("LLAMA_MODELS_HOST_DIR")
+	if llamaModelsHostDir == "" {
+		// Path on the docker HOST (not inside this container) where ./models
+		// lives. The bind-mount in compose uses this path verbatim, so it
+		// must point at the host filesystem, not /models inside backend.
+		llamaModelsHostDir = "./models"
+	}
+	llamaPortMin, _ := strconv.Atoi(os.Getenv("LLAMA_PORT_MIN"))
+	llamaPortMax, _ := strconv.Atoi(os.Getenv("LLAMA_PORT_MAX"))
+	llamaCtx, _ := strconv.Atoi(os.Getenv("LLAMA_N_CTX"))
+	llamaThreads, _ := strconv.Atoi(os.Getenv("LLAMA_N_THREADS"))
+	llamaGPULayers, _ := strconv.Atoi(os.Getenv("LLAMA_N_GPU_LAYERS"))
+	llamaParallel, _ := strconv.Atoi(os.Getenv("LLAMA_PARALLEL"))
+	llamaUseGPU := os.Getenv("LLAMA_USE_GPU") == "true" || os.Getenv("LLAMA_USE_GPU") == "1"
+	containerMgr, cmErr := services.NewContainerManager(modelRepo, services.ManagerConfig{
+		Image:         llamaImage,
+		Network:       llamaNetwork,
+		ModelsHostDir: llamaModelsHostDir,
+		PortMin:       llamaPortMin,
+		PortMax:       llamaPortMax,
+		NCtx:          llamaCtx,
+		NThreads:      llamaThreads,
+		NGPULayers:    llamaGPULayers,
+		Parallel:      llamaParallel,
+		UseGPU:        llamaUseGPU,
+		CacheTypeK:    os.Getenv("LLAMA_CACHE_TYPE_K"),
+		CacheTypeV:    os.Getenv("LLAMA_CACHE_TYPE_V"),
+	})
+	if cmErr != nil {
+		log.Printf("⚠️  ContainerManager init failed: %v (deploy endpoints will be unavailable)", cmErr)
+		containerMgr = nil
+	} else {
+		pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := containerMgr.Ping(pingCtx); err != nil {
+			log.Printf("⚠️  Docker daemon unreachable: %v (deploy endpoints will be unavailable)", err)
+			containerMgr = nil
+		} else {
+			log.Println("✓ Docker daemon reachable")
+			// Reconcile DB rows with actual container state — clears stale
+			// 'running' rows from a previous boot whose containers are gone.
+			if existing, err := modelRepo.GetAll(); err == nil {
+				containerMgr.Reconcile(pingCtx, existing)
+			}
+		}
+		cancel()
+	}
 
 	// Bootstrap a system admin account on first start. Two modes:
 	//   1) ADMIN_EMAIL only      → promote an existing registered user.
@@ -121,12 +195,13 @@ func main() {
 
 	// Initialize client and handlers
 	serviceClient := clients.NewClient(httpClient)
-	h := handlers.NewHandler(cfg, serviceClient, botRepo, convRepo, collabRepo)
+	h := handlers.NewHandler(cfg, serviceClient, botRepo, convRepo, collabRepo, modelRepo)
 	authHandler := handlers.NewAuthHandler(userRepo, jwtService)
-	botHandler := handlers.NewBotHandler(botRepo, collabRepo, userRepo, cfg)
+	botHandler := handlers.NewBotHandler(botRepo, collabRepo, userRepo, modelRepo, cfg)
 	convHandler := handlers.NewConversationHandler(convRepo, botRepo, collabRepo)
 	analyticsHandler := handlers.NewAnalyticsHandler(convRepo, botRepo)
 	adminHandler := handlers.NewAdminHandler(userRepo, botRepo, convRepo)
+	modelHandler := handlers.NewModelHandler(modelRepo, containerMgr)
 
 	// Create Fiber app with optimizations for high load
 	app := fiber.New(fiber.Config{
@@ -223,6 +298,14 @@ func main() {
 
 	// Analytics
 	protected.Get("/bots/:id/analytics", analyticsHandler.GetBotAnalytics)
+
+	// Models registry — base models are world-readable, finetuned only to owner.
+	// Deploy/stop drive Docker; they 503 if the daemon is unreachable.
+	protected.Get("/models", modelHandler.ListModels)
+	protected.Get("/models/:id", modelHandler.GetModel)
+	protected.Post("/models/:id/deploy", modelHandler.DeployModel)
+	protected.Post("/models/:id/stop", modelHandler.StopModel)
+	protected.Delete("/models/:id", modelHandler.DeleteModel)
 
 	// Admin (requires role='admin' on top of standard auth)
 	admin := protected.Group("/admin", auth.AdminMiddleware(userRepo))

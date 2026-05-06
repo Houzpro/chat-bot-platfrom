@@ -15,14 +15,16 @@ type BotHandler struct {
 	botRepo    *database.BotRepository
 	collabRepo *database.CollaboratorRepository
 	userRepo   *database.UserRepository
+	modelRepo  *database.ModelRepository
 	cfg        *config.Config
 }
 
-func NewBotHandler(botRepo *database.BotRepository, collabRepo *database.CollaboratorRepository, userRepo *database.UserRepository, cfg *config.Config) *BotHandler {
+func NewBotHandler(botRepo *database.BotRepository, collabRepo *database.CollaboratorRepository, userRepo *database.UserRepository, modelRepo *database.ModelRepository, cfg *config.Config) *BotHandler {
 	return &BotHandler{
 		botRepo:    botRepo,
 		collabRepo: collabRepo,
 		userRepo:   userRepo,
+		modelRepo:  modelRepo,
 		cfg:        cfg,
 	}
 }
@@ -41,6 +43,9 @@ type CreateBotRequest struct {
 	ChunkSize     int     `json:"chunk_size" validate:"omitempty,gte=100,lte=5000"`
 	ChunkOverlap  int     `json:"chunk_overlap" validate:"omitempty,gte=0,lte=1000"`
 	ContextWindow int     `json:"context_window" validate:"omitempty,gte=0,lte=50"`
+	// ModelID is optional. Empty string ("") means "use the platform default
+	// llama-cpp container". We validate access in CreateBot before saving.
+	ModelID string `json:"model_id"`
 }
 
 // UpdateBotRequest represents a request to update an existing bot.
@@ -60,6 +65,11 @@ type UpdateBotRequest struct {
 	ChunkSize     *int     `json:"chunk_size" validate:"omitempty,gte=100,lte=5000"`
 	ChunkOverlap  *int     `json:"chunk_overlap" validate:"omitempty,gte=0,lte=1000"`
 	ContextWindow *int     `json:"context_window" validate:"omitempty,gte=0,lte=50"`
+	// ModelID — pointer-to-string so we can distinguish three states:
+	//   nil     → field absent in JSON, leave existing assignment untouched.
+	//   *""     → caller wants to clear the assignment (use platform default).
+	//   *"uuid" → caller wants to set/replace the assignment.
+	ModelID *string `json:"model_id"`
 }
 
 // CreateBot creates a new bot
@@ -121,6 +131,20 @@ func (h *BotHandler) CreateBot(c *fiber.Ctx) error {
 		ChunkOverlap:  req.ChunkOverlap,
 		ContextWindow: req.ContextWindow,
 		IsActive:      true,
+	}
+
+	// Only validate + attach a model when the caller actually supplied one.
+	// An empty string keeps bot.ModelID = nil, which the RAG handler treats as
+	// "use the platform default llama-cpp endpoint".
+	if mid := strings.TrimSpace(req.ModelID); mid != "" {
+		if h.modelRepo == nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "model registry unavailable"})
+		}
+		allowed, _, err := h.modelRepo.CheckAccess(mid, userID)
+		if err != nil || !allowed {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "model not accessible"})
+		}
+		bot.ModelID = &mid
 	}
 
 	createdBot, err := h.botRepo.Create(bot)
@@ -253,6 +277,23 @@ func (h *BotHandler) UpdateBot(c *fiber.Ctx) error {
 	}
 	if req.ContextWindow != nil {
 		bot.ContextWindow = *req.ContextWindow
+	}
+	// Only react when ModelID is present in the JSON. *"" clears the
+	// assignment; *"uuid" sets/replaces it (with access check).
+	if req.ModelID != nil {
+		mid := strings.TrimSpace(*req.ModelID)
+		if mid == "" {
+			bot.ModelID = nil
+		} else {
+			if h.modelRepo == nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "model registry unavailable"})
+			}
+			allowed, _, err := h.modelRepo.CheckAccess(mid, userID)
+			if err != nil || !allowed {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "model not accessible"})
+			}
+			bot.ModelID = &mid
+		}
 	}
 
 	if err := h.botRepo.Update(bot); err != nil {

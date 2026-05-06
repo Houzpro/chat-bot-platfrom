@@ -50,6 +50,11 @@ type Bot struct {
 	ChunkOverlap  int `gorm:"default:200" json:"chunk_overlap"`
 	ContextWindow int `gorm:"default:0" json:"context_window"`
 
+	// Optional model assignment. NULL = use the platform default llama-cpp
+	// container (LLAMA_SERVER_URL). When set, RAG handler routes generation
+	// to the model's endpoint_url instead.
+	ModelID *string `gorm:"type:uuid;index" json:"model_id,omitempty"`
+
 	// Status
 	IsActive  bool      `gorm:"default:true;index" json:"is_active"`
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
@@ -173,6 +178,49 @@ type BotCollaborator struct {
 func (bc *BotCollaborator) BeforeCreate(tx *gorm.DB) error {
 	if bc.ID == "" {
 		bc.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// Model represents an LLM available for bot assignment. Two types coexist:
+//
+//   - "base"      : ships with the platform (e.g. the Qwen GGUF mounted into
+//                   the default llama-cpp container). owner_id is NULL because
+//                   everyone can use it. endpoint_url points at the shared
+//                   llama-cpp service.
+//   - "finetuned" : produced by a user's fine-tune job. owner_id is the user
+//                   who trained it; only the owner sees it in /models. Each
+//                   finetuned model has its own llama-cpp container, and
+//                   endpoint_url is filled in once the container is deployed.
+//
+// status reflects the lifecycle (`ready` for base models, `training`
+// /`converting`/`deploying`/`running`/`stopped`/`error` for finetuned).
+type Model struct {
+	ID          string  `gorm:"type:uuid;primaryKey" json:"id"`
+	OwnerID     *string `gorm:"type:uuid;index" json:"owner_id,omitempty"`
+	Name        string  `gorm:"not null;size:255" json:"name"`
+	Type        string  `gorm:"size:20;not null;index" json:"type"`
+	FilePath    string  `gorm:"size:500;not null" json:"file_path"`
+	BaseModelID *string `gorm:"type:uuid" json:"base_model_id,omitempty"`
+	GGUFPath    string  `gorm:"size:500" json:"gguf_path,omitempty"`
+
+	// Container metadata. For base models this points at the platform-wide
+	// llama-cpp container; for finetuned models it's set by the container
+	// manager when the user clicks "Deploy".
+	ContainerName string `gorm:"size:255" json:"container_name,omitempty"`
+	ContainerPort int    `json:"container_port,omitempty"`
+	EndpointURL   string `gorm:"size:500" json:"endpoint_url,omitempty"`
+
+	Status     string    `gorm:"size:20;default:'ready';not null" json:"status"`
+	Parameters string    `gorm:"type:jsonb;default:'{}'" json:"parameters,omitempty"`
+	CreatedAt  time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+// BeforeCreate hook to generate UUID for Model
+func (m *Model) BeforeCreate(tx *gorm.DB) error {
+	if m.ID == "" {
+		m.ID = uuid.New().String()
 	}
 	return nil
 }

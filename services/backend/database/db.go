@@ -83,6 +83,7 @@ func (db *DB) AutoMigrate() error {
 
 	if err := db.Conn.AutoMigrate(
 		&User{},
+		&Model{},
 		&Bot{},
 		&BotDocument{},
 		&Conversation{},
@@ -92,6 +93,23 @@ func (db *DB) AutoMigrate() error {
 	); err != nil {
 		return err
 	}
+
+	// Enforce model.type CHECK at the DB level; GORM tags don't emit it.
+	db.Conn.Exec(`
+		DO $$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'models_type_check') THEN
+				ALTER TABLE models ADD CONSTRAINT models_type_check CHECK (type IN ('base', 'finetuned'));
+			END IF;
+		END $$;
+	`)
+	db.Conn.Exec(`
+		DO $$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'models_status_check') THEN
+				ALTER TABLE models ADD CONSTRAINT models_status_check
+					CHECK (status IN ('ready', 'training', 'converting', 'deploying', 'running', 'stopped', 'error'));
+			END IF;
+		END $$;
+	`)
 
 	// Backfill role for existing users that pre-date the role column.
 	// AutoMigrate adds the column with default 'user', but rows inserted before

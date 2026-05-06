@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { ArrowLeft, Save, Upload, X, FileText, Trash2, UserPlus, Users } from 'lucide-react'
-import { botsAPI, collaboratorsAPI } from '../api/client'
+import { botsAPI, collaboratorsAPI, modelsAPI } from '../api/client'
 import ThemeToggle from './ThemeToggle'
 import './BotForm.css'
 
@@ -29,6 +29,15 @@ const sanitizeBotPayload = (data) => {
       delete payload[field]
     }
   })
+
+  // model_id is sent as-is (string) so the backend can distinguish:
+  //   ""     → clear the assignment / use default
+  //   "uuid" → bind this model
+  // We don't omit empty model_id here — that would prevent users from
+  // un-binding a previously-selected model on edit.
+  if (typeof payload.model_id !== 'string') {
+    delete payload.model_id
+  }
 
   return payload
 }
@@ -60,8 +69,13 @@ function BotForm({ token, bot, onSave, onCancel }) {
     do_sample: bot?.do_sample ?? true,
     context_window: bot?.context_window ?? 0,
     system_prompt: bot?.system_prompt || '',
-    is_active: bot?.is_active ?? true
+    is_active: bot?.is_active ?? true,
+    // model_id="" means "use the platform default". Stored as a string so
+    // the <select> control round-trips cleanly; we strip it on submit.
+    model_id: bot?.model_id || ''
   })
+  const [availableModels, setAvailableModels] = useState([])
+  const [modelsError, setModelsError] = useState('')
   const [maxNewTokensLimit, setMaxNewTokensLimit] = useState(DEFAULT_MAX_NEW_TOKENS_LIMIT)
   const [maxFileSize, setMaxFileSize] = useState(DEFAULT_MAX_FILE_SIZE)
   const [allowedExtensions, setAllowedExtensions] = useState(DEFAULT_ALLOWED_EXTENSIONS)
@@ -97,6 +111,14 @@ function BotForm({ token, bot, onSave, onCancel }) {
       })
       .catch(() => {})
   }, [bot])
+  // Fetch the registry once on mount. Backend already enforces visibility
+  // (base + only this user's finetuned), so we render the items as-is.
+  useEffect(() => {
+    modelsAPI.list()
+      .then(data => setAvailableModels(Array.isArray(data?.items) ? data.items : []))
+      .catch(err => setModelsError(err.message || 'Failed to load models'))
+  }, [])
+
   const [files, setFiles] = useState([])
   const [existingDocs, setExistingDocs] = useState([])
   const [deletingDocId, setDeletingDocId] = useState(null)
@@ -392,6 +414,51 @@ function BotForm({ token, bot, onSave, onCancel }) {
               />
               <span>Active (bot is accessible)</span>
             </label>
+          </div>
+        </div>
+
+        <div className="form-section">
+          <h2>Model</h2>
+          <p className="section-description">
+            Choose which LLM serves this bot. Base models are shared with everyone; your fine-tuned models are private.
+          </p>
+          <div className="form-group">
+            <label htmlFor="model_id">Model</label>
+            <select
+              id="model_id"
+              name="model_id"
+              value={formData.model_id || ''}
+              onChange={handleChange}
+              disabled={isLoading}
+            >
+              <option value="">Platform default</option>
+              {availableModels.filter(m => m.type === 'base').length > 0 && (
+                <optgroup label="Base models">
+                  {availableModels.filter(m => m.type === 'base').map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}{m.status !== 'running' ? ` (${m.status})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {availableModels.filter(m => m.type === 'finetuned').length > 0 && (
+                <optgroup label="My fine-tuned models">
+                  {availableModels.filter(m => m.type === 'finetuned').map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}{m.status !== 'running' ? ` (${m.status})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            {modelsError && <small className="error-message">{modelsError}</small>}
+            {(() => {
+              const selected = availableModels.find(m => m.id === formData.model_id)
+              if (selected && selected.type === 'finetuned' && selected.status !== 'running') {
+                return <small className="error-message">This model is not deployed — chat will fail until you start it.</small>
+              }
+              return <small>Empty = use the platform default llama.cpp container.</small>
+            })()}
           </div>
         </div>
 

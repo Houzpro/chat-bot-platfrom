@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Plus, Bot, LogOut, Trash2, Edit, ExternalLink, Upload, BarChart2, Search, X, ShieldCheck } from 'lucide-react'
+import { Plus, Bot, LogOut, Trash2, Edit, ExternalLink, Upload, BarChart2, Search, X, ShieldCheck, Cpu } from 'lucide-react'
 import BotChat from './BotChat'
 import BotForm from './BotForm'
 import Analytics from './Analytics'
@@ -310,6 +310,10 @@ function Dashboard({ token, user, onLogout, activeBotId = null, analyticsBotId =
                 Admin
               </button>
             )}
+            <button onClick={() => navigate('/models')} className="logout-btn" title="My Models">
+              <Cpu size={18} />
+              Models
+            </button>
             <button onClick={handleCreateBot} className="create-bot-btn">
               <Plus size={18} />
               Create Bot
